@@ -54,6 +54,7 @@ def http_get(url, referer=None, timeout=30, retries=3):
 
 
 def fetch_yahoo_daily(symbol, start_dt):
+    time.sleep(0.4)  # 节流：多品种连续请求时避免触发 Yahoo 限流
     p1 = int(start_dt.timestamp())
     p2 = int(datetime.now(timezone.utc).timestamp())
     url = (f"https://query2.finance.yahoo.com/v8/finance/chart/{urllib.request.quote(symbol)}"
