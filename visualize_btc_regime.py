@@ -160,7 +160,7 @@ def divergence_signals(closes, rsi, os=30, ob=70):
 def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cross_fix=False,
                  range_retrigger=True, div_fail=True, div_expiry_days=None, div_expiry_ret=0.0,
                  div_fail_buf=None, trend_flat=False, trend_flat_ext=0.03, trend_flat_ret=0.03,
-                 trend_flat_days=10):
+                 trend_flat_days=10, ma_slow=120, ma_fast=60):
     """confirm=1 单日事件触发；confirm>=2 需 RSI 连续 N 日站上 ob（或下 os）才切换。
     趋势→震荡：RSI 连续 confirm 日站上 ob（确认进入超买）后，再跌破 ob（离开超买）才切 RANGE；
       DOWN 对称（确认进入超卖后，再升破 os 才切 RANGE）。强趋势中 RSI 持续超买不离场则不切，
@@ -188,14 +188,18 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
     trend_flat=True 时，趋势态（UP/DOWN）加「盘整识别」退出：进入趋势态后，价格沿方向
       走出 trend_flat_ext 幅度（兑现）后，若从方向极值回撤超过 trend_flat_ret 且连续
       trend_flat_days 日维持，则判定趋势走完进入盘整，切 RANGE。解决趋势兑现后底部/顶部
-      长期窄幅盘整仍粘在趋势态的问题（黄金 61 天假 DOWN、69 天假 UP 的根因）。"""
+      长期窄幅盘整仍粘在趋势态的问题（黄金 61 天假 DOWN、69 天假 UP 的根因）。
+    ma_slow / ma_fast：慢线（定方向初始化 + 背离态的参照）与快线（震荡中穿越触发）长度。
+      日线默认 120/60；周线按「÷5 机械映射」传 24/12（120 交易日≈24 周、60 交易日≈12 周），
+      物理含义不变，只是采样频率降低。自由度为 0，不允许为周线单独调参（避免过拟合）。"""
     n = len(closes)
     st = [None] * n
     triggers = [None] * n
-    if start_idx >= n or start_idx < 120:
+    if start_idx >= n or start_idx < ma_slow:
         return st, None, triggers
     rsi = rsi_wilder(closes)
-    ma120, ma60 = sma(closes, 120), sma(closes, 60)
+    # 变量名沿用 ma120/ma60 以免大范围改动，语义即「慢线 / 快线」
+    ma120, ma60 = sma(closes, ma_slow), sma(closes, ma_fast)
     if ma120[start_idx] is None:
         return st, None, triggers
     bull = bear = None
@@ -454,6 +458,45 @@ def merge_short_segments(segs, min_days=3):
 STATE_CN = {"UP": "上升", "RANGE": "震荡", "DOWN": "下降"}
 STATE_COLOR = {"UP": "#d23c3c", "RANGE": "#b8860b", "DOWN": "#1a7f37"}
 STATE_HEX = {"UP": "#e8b4b4", "RANGE": "#e8d9a8", "DOWN": "#b4d8b4"}
+
+
+def iso_week_key(date_str):
+    """'2026-11-09' → (2026, 45)，ISO 周（周一起算）分组键。跨市场统一。"""
+    y, w, _ = datetime.strptime(date_str, "%Y-%m-%d").isocalendar()
+    return (y, w)
+
+
+def to_weekly(rows, min_bars=3, drop_current=True, today=None):
+    """日线 [{date, close}] → 周线 bar [{date, close, n_bars}]（ISO 周聚合，取每周最后收盘）。
+
+    G 方案的判定与背离都基于收盘价摆动，所以周线同样只需收盘序列，不需要 OHLC。
+    规则：
+      - 按 ISO 周（周一起算）分组，加密 7×24 与 ETF 周一~周五通用
+      - 每周取该周最后一个交易日的收盘为周收盘，date 用该真实交易日
+      - 交易日数 < min_bars 的残缺周丢弃（ETF 感恩节/圣诞等长假周，周收盘代表性弱）
+      - drop_current=True 丢弃「尚未走完的当前周」：否则周线状态会在周一~周五之间逐日
+        抖动，慢变量语义失效——这是多周期共振最容易踩的坑。
+    """
+    if today is None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cur_key = iso_week_key(today)
+    buckets, order = {}, []
+    for r in rows:
+        k = iso_week_key(r["date"])
+        if k not in buckets:
+            buckets[k] = []
+            order.append(k)
+        buckets[k].append(r)
+    out = []
+    for k in order:
+        bars = buckets[k]
+        if drop_current and k == cur_key:
+            continue
+        if len(bars) < min_bars:
+            continue
+        last = bars[-1]
+        out.append({"date": last["date"], "close": last["close"], "n_bars": len(bars)})
+    return out
 
 
 def gen_svg(pts, segs, div_marks=None):

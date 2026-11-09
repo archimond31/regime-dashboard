@@ -9,6 +9,7 @@
 !visualize_eth_gold_regime.py
 !daily_regime_alert.py
 !build_dashboard.py
+!backtest_multi_tf.py
 
 # CI/CD 部署
 !.github/
@@ -22,3 +23,6 @@
 # 生成的产物（Actions 每次重新生成）
 regime_dashboard.html
 *.html
+
+# 例外：多周期验证报告是结论快照，随仓库一起发布（不随 CI 重算）
+!backtest_multi_tf.html

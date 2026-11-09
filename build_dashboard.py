@@ -29,7 +29,8 @@ from visualize_btc_regime import (
 )
 from visualize_eth_gold_regime import fetch_yahoo_daily
 from daily_regime_alert import (
-    ASSETS, GROUP_ORDER, fetch_hyperliquid_daily, compute_regime,
+    ASSETS, GROUP_ORDER, fetch_hyperliquid_daily, compute_regime, compute_regime_weekly,
+    resonance_gate, GATE_CN, trig_cn,
     STATE_CN, STATE_COLOR, TRIGGER_CN, fmt_price, WARM_START, START, drop_unclosed,
 )
 
@@ -100,20 +101,31 @@ def render_summary(summary):
             unit = s.get("unit", "")
             stale = (" <span style='color:#c00;font-size:11px;'>⚠️沿用旧数据</span>"
                      if s.get("stale") else "")
+            wstate = s.get("weekly_state")
+            gate = s.get("gate", "na")
+            if wstate:
+                wcell = (f"<span style='color:{STATE_COLOR.get(wstate, '#888')};'>"
+                         f"{STATE_CN.get(wstate, wstate)}</span>")
+            else:
+                wcell = "<span style='color:#bbb;'>—</span>"
+            if gate == "block":
+                wcell += (" <span style='color:#b8860b;font-weight:bold;font-size:11px;' "
+                          f"title='{s.get('gate_note', '')}'>⚠反向</span>")
             trs += (
                 f"<tr><td>{s['label']} <span style='color:#999;font-size:11px;'>{unit}</span>{stale}</td>"
                 f"<td style='background:{color};color:#fff;font-weight:bold;text-align:center;'>"
                 f"{STATE_CN.get(state, state)}</td>"
+                f"<td style='text-align:center;'>{wcell}</td>"
                 f"<td style='text-align:right;'>{fmt_price(s['regime'].get('close'))}</td>"
                 f"<td style='text-align:right;'>{s['regime'].get('rsi') or 0:.1f}</td>"
                 f"<td style='text-align:right;'>{fmt_price(s['regime'].get('ma60'))}</td>"
                 f"<td style='text-align:right;'>{fmt_price(s['regime'].get('ma120'))}</td>"
                 f"<td style='white-space:nowrap;color:#666;'>{s['regime'].get('trigger_date', '—')}</td>"
-                f"<td>{TRIGGER_CN.get(s['regime'].get('trigger', ''), s['regime'].get('trigger', ''))}</td>"
+                f"<td>{trig_cn(s['regime'].get('trigger', ''))}</td>"
                 f"<td style='text-align:center;'>{s['regime'].get('since_days', '-')}</td></tr>")
         blocks += (
             f"<h3 class='group'>{g}（{len(groups[g])}）</h3>"
-            f"<table class='sum'><tr><th>品种</th><th>状态</th><th>收盘</th><th>RSI14</th>"
+            f"<table class='sum'><tr><th>品种</th><th>日线</th><th>周线</th><th>收盘</th><th>RSI14</th>"
             f"<th>MA60</th><th>MA120</th><th>触发日期</th><th>最近触发</th><th>持续(日)</th></tr>"
             f"{trs}</table>")
     return blocks
@@ -158,14 +170,25 @@ def render_tabs():
             f"<div class='tabbar'>状态：{sbtns}</div>")
 
 
-def render_changes(changes):
-    """今日状态切换提示条。"""
-    if not changes:
-        return "<div class='changes none'>今日无状态切换</div>"
-    items = "".join(
-        f"<span class='chg'>{c['label']} <b>{STATE_CN.get(c['from'], c['from'])}→{STATE_CN.get(c['to'], c['to'])}</b></span>"
-        for c in changes)
-    return f"<div class='changes'><b>今日状态切换（{len(changes)}）</b> {items}</div>"
+def render_changes(changes, blocked=None):
+    """今日状态切换提示条 + 今日「日线与周线反向」提示条（中性描述，不算信号）。"""
+    blocked = blocked or []
+    out = []
+    if changes:
+        items = "".join(
+            f"<span class='chg'>{c['label']} <b>{STATE_CN.get(c['from'], c['from'])}→{STATE_CN.get(c['to'], c['to'])}</b></span>"
+            for c in changes)
+        out.append(f"<div class='changes'><b>今日状态切换（{len(changes)}）</b> {items}</div>")
+    elif not blocked:
+        out.append("<div class='changes none'>今日无状态切换，日周方向一致</div>")
+    if blocked:
+        items = "".join(
+            f"<span class='chg block'>{b['label']} <b>日{STATE_CN.get(b['daily'], b['daily'])}"
+            f"／周{STATE_CN.get(b['weekly'], b['weekly'])}</b></span>"
+            for b in blocked)
+        out.append("<div class='changes blocked'><b>日线与周线反向（%d）</b> "
+                   "方向冲突，仅作状态描述、不构成交易建议 %s</div>" % (len(blocked), items))
+    return "".join(out)
 
 
 def main():
@@ -174,6 +197,7 @@ def main():
     summary = []
     cards = []
     changes = []
+    blocked = []
     new_state = {}
 
     for a in ASSETS:
@@ -182,6 +206,11 @@ def main():
             dates = [r["date"] for r in rows]
             closes = [r["close"] for r in rows]
             reg = compute_regime(closes, dates)
+            wreg = compute_regime_weekly(rows)
+            wstate = wreg.get("state")
+            gate, gate_note = resonance_gate(reg["state"], wstate)
+            if gate == "block":
+                blocked.append({"label": a["label"], "daily": reg["state"], "weekly": wstate})
             # 今日状态切换对比（仅对有上次记录且状态变化的品种）
             prev = prev_assets.get(a["key"])
             if prev and prev.get("state") and prev["state"] != reg["state"]:
@@ -206,24 +235,30 @@ def main():
             color = STATE_COLOR.get(state, "#888")
             cards.append({
                 "label": a["label"], "group": a["group"], "state": state, "color": color,
+                "weekly_state": wstate, "gate": gate,
                 "svg": gen_svg(pts, segs, marks), "table": seg_table(segs), "n_seg": len(segs),
                 "raw_n": raw_n, "merged": raw_n - len(segs), "as_of": dates[-1], "stale": False,
             })
             summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
-                            "unit": a.get("unit", ""), "regime": reg, "stale": False})
-            new_state[a["key"]] = reg
-            print(f"[{a['key']:5}] {STATE_CN.get(state, state):3}  {len(segs)} 个区间"
-                  f"（合并 {raw_n - len(segs)} 个碎片）  {dates[-1]}")
+                            "unit": a.get("unit", ""), "regime": reg, "stale": False,
+                            "weekly_state": wstate, "gate": gate, "gate_note": gate_note})
+            new_state[a["key"]] = dict(reg, weekly_state=wstate, gate=gate)
+            print(f"[{a['key']:5}] 日{STATE_CN.get(state, state):3} "
+                  f"周{STATE_CN.get(wstate, wstate or '—'):3} {GATE_CN.get(gate, gate):2} "
+                  f"{len(segs)} 个区间（合并 {raw_n - len(segs)} 个碎片）  {dates[-1]}")
         except Exception as e:  # noqa: BLE001
             prev = prev_assets.get(a["key"])
             if prev:
                 # 降级：沿用上次成功数据（不纳入今日切换）
                 st_state = prev.get("state", "N/A")
+                pw, pg = prev.get("weekly_state"), prev.get("gate", "na")
                 summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
-                                "unit": a.get("unit", ""), "regime": prev, "stale": True})
+                                "unit": a.get("unit", ""), "regime": prev, "stale": True,
+                                "weekly_state": pw, "gate": pg, "gate_note": "沿用上次结论"})
                 new_state[a["key"]] = prev
                 cards.append({"label": a["label"], "group": a["group"], "state": st_state,
                               "color": STATE_COLOR.get(st_state, "#888"),
+                              "weekly_state": pw, "gate": pg,
                               "svg": f"<p style='color:#c00;padding:8px;'>本次抓取失败，沿用 {prev.get('as_of', '')} 的数据</p>",
                               "table": "", "n_seg": 0, "raw_n": 0, "merged": 0,
                               "as_of": prev.get("as_of", "-"), "stale": True})
@@ -231,10 +266,11 @@ def main():
             else:
                 print(f"[{a['key']:5}] 失败(无历史): {e}")
                 cards.append({"label": a["label"], "group": a["group"], "state": "N/A",
-                              "color": "#888", "svg": "<p style='color:#999'>取数/计算失败</p>",
+                              "color": "#888", "weekly_state": None, "gate": "na",
+                              "svg": "<p style='color:#999'>取数/计算失败</p>",
                               "table": "", "n_seg": 0, "raw_n": 0, "merged": 0, "as_of": "-", "stale": False})
                 summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
-                                "unit": a.get("unit", ""),
+                                "unit": a.get("unit", ""), "weekly_state": None, "gate": "na",
                                 "regime": {"state": "N/A", "reason": str(e)}, "stale": False})
 
     card_groups = {}
@@ -249,10 +285,19 @@ def main():
             merged_note = (f" <span class='muted'>（合并 {c['merged']} 个 &lt;{MIN_DAYS}天碎片）</span>"
                            if c["merged"] else "")
             stale_badge = " <span style='color:#c00;font-size:12px;'>⚠️沿用旧数据</span>" if c.get("stale") else ""
+            wst = c.get("weekly_state")
+            wchip = ""
+            if wst:
+                wcol = STATE_COLOR.get(wst, "#888")
+                wchip = (f"<span class='wk' style='color:{wcol};border-color:{wcol};'>"
+                         f"周线 {STATE_CN.get(wst, wst)}</span>")
+            if c.get("gate") == "block":
+                wchip += "<span class='wk blk'>日周反向</span>"
             card_blocks += (
                 f"<div class='card' data-group='{c['group']}' data-state='{c['state']}'>"
                 f"<div class='card-head'><span class='name'>{c['label']}</span>"
                 f"<span class='badge' style='background:{c['color']};'>{STATE_CN.get(c['state'], c['state'])}</span>"
+                f"{wchip}"
                 f"<span class='muted' style='margin-left:8px;'>截至 {c['as_of']}{merged_note}</span>{stale_badge}</div>"
                 f"{c['svg']}"
                 + (f"<details><summary>查看区间明细（{c['n_seg']} 个区间）</summary>{c['table']}</details>"
@@ -262,8 +307,11 @@ def main():
     run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     n_total = len(ASSETS)
     n_stale = sum(1 for s in summary if s.get("stale"))
+    n_block = sum(1 for s in summary if s.get("gate") == "block")
     stale_note = (f"｜<span style='color:#c00;'>{n_stale} 个品种沿用旧数据</span>"
                   if n_stale else "")
+    block_note = (f"｜<span style='color:#b8860b;'>{n_block} 个品种日线与周线反向</span>"
+                  if n_block else "")
     html = f"""<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>市场趋势监控面板</title>
@@ -275,8 +323,13 @@ def main():
   .changes {{ background:#fff7e6; border-left:5px solid #d98a00; border-radius:8px; padding:10px 14px;
     margin:0 0 14px; font-size:13px; }}
   .changes.none {{ background:#f2f6f2; border-left-color:#4a9e4a; color:#666; }}
+  .changes.blocked {{ background:#fff8ec; border-left-color:#d98a00; color:#7a5200; }}
   .changes .chg {{ display:inline-block; background:#fff; border:1px solid #e6c98a; border-radius:12px;
     padding:2px 10px; margin:3px 4px 0 0; }}
+  .changes .chg.block {{ border-color:#e0b060; }}
+  .wk {{ display:inline-block; margin-left:8px; padding:1px 9px; border:1px solid #ccc;
+    border-radius:10px; font-size:12px; background:#fff; }}
+  .wk.blk {{ background:#fff8ec; border-color:#e0b060; color:#8a5a00; }}
   .stats {{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 16px; }}
   .sc {{ background:#fff; border-radius:10px; padding:10px 16px; box-shadow:0 1px 3px rgba(0,0,0,.08); }}
   .sc.main {{ border-left:5px solid #3a7bd5; }}
@@ -310,9 +363,9 @@ def main():
 </style></head>
 <body><div class="wrap">
   <h1>市场趋势监控面板</h1>
-  <p class="sub">生成时间：{run_at}（北京时间）｜监控 {n_total} 个品种｜红=上升 / 黄=震荡 / 绿=下降（国内配色）{stale_note}</p>
+  <p class="sub">生成时间：{run_at}（北京时间）｜监控 {n_total} 个品种｜红=上升 / 黄=震荡 / 绿=下降（国内配色）{block_note}{stale_note}</p>
 
-  {render_changes(changes)}
+  {render_changes(changes, blocked)}
   {render_stats(summary)}
   {render_tabs()}
 
@@ -328,6 +381,11 @@ def main():
     判定规则（日线状态机 G 方案）：MA120 初始化定方向 → 趋势中 RSI 连续 2 日站上 70/30 后回落离开极值转震荡 →
     震荡中 MA60 穿越或 RSI 再触发回趋势；叠加 RSI 背离（最高优先级）、反向穿越纠错、背离失败检测。
     短历史品种（如 HYPE）自动用「数据起点 + 120 根热身」动态起点。<br>
+    <b>多周期（周线）状态</b>：周线跑<b>同一套</b>状态机，参数为日线的 ÷5 机械映射
+    （MA120→MA24、MA60→MA12，自由度为 0，不为周线单独调参）；只取已走完的周，
+    当前周未收盘前不参与判定。日线与周线方向相反时标「日周反向」，<b>仅作状态描述</b>——
+    把它当作「风险闸门」的假设已在 2021-2026 全 18 品种样本上验证并证伪：冲突格的前瞻收益
+    没有显著劣势（20 日 p=0.59/0.75），闸门版策略仅跑赢 9/18 品种（=掷硬币），故不参与信号过滤。<br>
     本面板为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）。
   </div>
 </div>

@@ -47,7 +47,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAIL_CFG = os.path.join(HERE, "mail_config.json")
 REPORT_HTML = os.path.join(HERE, "regime_report.html")
 START = "2024-01-01"      # 策略判定起点（与可视化一致）
-WARM_START = "2023-06-01"  # 数据起点（供 MA120 热身 120+ 根）
+WARM_START = "2021-01-01"  # 数据起点：日线 MA120 热身 + 周线 MA24 热身（2021 起周线约 300 周）
+# 周线参数 = 日线参数的 ÷5 机械映射，自由度为 0：120 交易日≈24 周、60 交易日≈12 周。
+# 不允许为周线单独调参（否则等于在 18 个品种上开了两个自由度，极易过拟合）。
+WEEKLY_MA_SLOW, WEEKLY_MA_FAST = 120 // 5, 60 // 5
 
 ASSETS = [
     # 加密（Hyperliquid 永续合约日线；统一源，无地域封锁、无 key、无限流；USD/枚）
@@ -227,23 +230,26 @@ def rsi_wilder(closes, n=14):
     return out
 
 
-def compute_regime(closes, dates):
+def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
     """G 方案最终状态机回放，返回最后状态的关键字段。
 
     与可视化脚本同源：调用 daily_states（ob=70 / os=30 / 背离 / 两日确认 /
-    反向穿越纠错 / 背离失败检测），提取最后状态、最近一次触发原因与持续天数。"""
-    s0 = bisect.bisect_left(dates, START)
+    反向穿越纠错 / 背离失败检测），提取最后状态、最近一次触发原因与持续天数。
+    ma_slow/ma_fast：日线 120/60；周线传 WEEKLY_MA_SLOW/FAST（24/12，÷5 机械映射）。"""
+    start = start or START
+    s0 = bisect.bisect_left(dates, start)
     last = len(closes) - 1
-    if s0 < 120:
-        # 短历史品种（如 HYPE，2024-11 才 TGE）：不足以在 2024-01-01 前热身 120 根，
-        # 退化为「数据起点 + 120 根热身」作为动态判定起点
-        s0 = 120
+    if s0 < ma_slow:
+        # 短历史品种（如 HYPE，2024-12 才 TGE）：不足以在 start 前热身满慢线，
+        # 退化为「数据起点 + 慢线长度」作为动态判定起点
+        s0 = ma_slow
     if s0 >= len(closes):
         return {"state": "N/A", "reason": "insufficient_data",
                 "as_of": dates[last] if dates else ""}
-    st, _div, triggers = daily_states(closes, s0, 70, 30, True, 2, True)
+    st, _div, triggers = daily_states(closes, s0, 70, 30, True, 2, True,
+                                      ma_slow=ma_slow, ma_fast=ma_fast)
     rsi = rsi_wilder(closes)
-    ma60, ma120 = sma(closes, 60), sma(closes, 120)
+    ma60, ma120 = sma(closes, ma_fast), sma(closes, ma_slow)
     state = st[last]
     trigger, since_idx = "init_ma120", s0
     for i in range(last, s0 - 1, -1):
@@ -261,6 +267,24 @@ def compute_regime(closes, dates):
         "since_days": last - since_idx,
         "as_of": dates[last],
     }
+
+
+def compute_regime_weekly(rows, start=None):
+    """周线状态：同一 G 方案状态机，MA24/MA12（= MA120/MA60 的 ÷5 机械映射）。
+
+    rows 为日线 [{date, close}]；先聚合成周线再回放状态机。
+    周线不足 WEEKLY_MA_SLOW+5 根时返回 N/A（不硬凑结论）。"""
+    from visualize_btc_regime import to_weekly
+    start = start or START
+    wrows = to_weekly(rows)
+    if len(wrows) < WEEKLY_MA_SLOW + 5:
+        return {"state": "N/A", "reason": "weekly_insufficient",
+                "as_of": wrows[-1]["date"] if wrows else "", "n_weeks": len(wrows)}
+    wc = [r["close"] for r in wrows]
+    wd = [r["date"] for r in wrows]
+    reg = compute_regime(wc, wd, start=start, ma_slow=WEEKLY_MA_SLOW, ma_fast=WEEKLY_MA_FAST)
+    reg["n_weeks"] = len(wrows)
+    return reg
 
 
 # ---------------- 状态展示 ----------------
@@ -285,6 +309,42 @@ TRIGGER_CN = {
 }
 
 
+def trig_cn(key, ma_slow=120, ma_fast=60):
+    """触发原因中文：MA120 / MA60 字样按实际周期替换（周线为 MA24 / MA12）。"""
+    txt = TRIGGER_CN.get(key, key)
+    return txt.replace("MA120", f"MA{ma_slow}").replace("MA60", f"MA{ma_fast}")
+
+
+def resonance_gate(daily_state, weekly_state):
+    """日线与周线的方向关系。返回 (gate, 说明)。
+
+    gate:
+      pass  —— 方向一致（或周线震荡，不构成反向）
+      block —— 日线与周线方向相反（状态描述，不是禁止交易的指令）
+      na    —— 日线无方向或周线数据不足，不适用
+
+    重要：此函数最初按「风险闸门」设计（周线反向就不做逆势单）。该假设已用 2021-2026
+    全 18 品种样本验证并证伪——冲突格的前瞻收益没有显著劣势（20 日 p=0.59/0.75），
+    闸门版策略仅跑赢 9/18 品种（等于掷硬币）。因此返回值现在只用于**状态描述**，
+    不接入任何信号过滤。详见 backtest_multi_tf.py / backtest_multi_tf.html。
+    """
+    if daily_state in (None, "", "N/A") or weekly_state in (None, "", "N/A"):
+        return "na", "周线数据不足"
+    if daily_state == "RANGE":
+        return "na", "日线震荡，无方向"
+    if daily_state == "UP" and weekly_state == "DOWN":
+        return "block", "日线上升、周线下降"
+    if daily_state == "DOWN" and weekly_state == "UP":
+        return "block", "日线下降、周线上升"
+    if daily_state == weekly_state:
+        return "pass", "日周同向"
+    return "pass", "周线震荡，不构成反向"
+
+
+GATE_CN = {"pass": "一致", "block": "反向", "na": "—"}
+GATE_COLOR = {"pass": "#1a7f37", "block": "#b8860b", "na": "#999"}
+
+
 def fmt_price(p):
     """按价格量级自适应小数位，避免 DOGE/SUI 等低价币显示成 0。"""
     if p is None:
@@ -301,17 +361,27 @@ def _render_table(rows):
     for r in rows:
         state = r["regime"]["state"]
         color = STATE_COLOR.get(state, "#888")
+        wreg = r.get("weekly") or {}
+        wstate = wreg.get("state")
+        gate = r.get("gate", "na")
+        if wstate:
+            wcell = f"<span style='color:{STATE_COLOR.get(wstate, '#888')};'>{STATE_CN.get(wstate, wstate)}</span>"
+        else:
+            wcell = "—"
+        if gate == "block":
+            wcell += " <span style='color:#c00;font-weight:bold;'>⚠拦截</span>"
         trs += (
             f"<tr>"
             f"<td>{r['label']} <span style='color:#999;font-size:11px;'>{r.get('unit','')}</span></td>"
             f"<td style='background:{color};color:#fff;font-weight:bold;text-align:center;'>"
             f"{STATE_CN.get(state, state)}</td>"
+            f"<td style='text-align:center;'>{wcell}</td>"
             f"<td style='text-align:right;'>{fmt_price(r['regime'].get('close'))}</td>"
             f"<td style='text-align:right;'>{r['regime'].get('rsi') or 0:.1f}</td>"
             f"<td style='text-align:right;'>{fmt_price(r['regime'].get('ma60'))}</td>"
             f"<td style='text-align:right;'>{fmt_price(r['regime'].get('ma120'))}</td>"
             f"<td style='white-space:nowrap;color:#666;'>{r['regime'].get('trigger_date', '—')}</td>"
-            f"<td>{TRIGGER_CN.get(r['regime'].get('trigger', ''), r['regime'].get('trigger', ''))}</td>"
+            f"<td>{trig_cn(r['regime'].get('trigger', ''))}</td>"
             f"<td style='text-align:center;'>{r['regime'].get('since_days', '-')}</td>"
             f"</tr>"
         )
@@ -319,7 +389,7 @@ def _render_table(rows):
         f"<table border='0' cellpadding='6' cellspacing='0' "
         f"style='border-collapse:collapse;font-size:13px;'>"
         f"<tr style='background:#f0f0f0;text-align:left;'>"
-        f"<th>品种</th><th>状态</th><th>收盘</th><th>RSI14</th><th>MA60</th><th>MA120</th>"
+        f"<th>品种</th><th>日线</th><th>周线</th><th>收盘</th><th>RSI14</th><th>MA60</th><th>MA120</th>"
         f"<th>触发日期</th><th>最近触发</th><th>持续(日)</th></tr>{trs}</table>"
     )
 
@@ -398,17 +468,22 @@ def main():
             closes = [r["close"] for r in rows]
             dates = [r["date"] for r in rows]
             reg = compute_regime(closes, dates)
+            wreg = compute_regime_weekly(rows)
+            gate, gate_note = resonance_gate(reg["state"], wreg.get("state"))
             reports.append({"key": a["key"], "label": a["label"],
                             "group": a.get("group", "其他"), "unit": a.get("unit", ""),
-                            "regime": reg})
-            print(f"[{a['key']:5}] {STATE_CN.get(reg['state'], reg['state']):3}  "
-                  f"close={reg.get('close', 0):,.4f}  RSI={reg.get('rsi', 0):.1f}  "
+                            "regime": reg, "weekly": wreg, "gate": gate, "gate_note": gate_note})
+            print(f"[{a['key']:5}] 日{STATE_CN.get(reg['state'], reg['state']):3} "
+                  f"周{STATE_CN.get(wreg.get('state'), wreg.get('state') or '—'):3} "
+                  f"{GATE_CN.get(gate, gate):2} "
+                  f"close={reg.get('close', 0):,.4f}  RSI={reg.get('rsi') or 0:.1f}  "
                   f"as_of={reg.get('as_of')}  触发={reg.get('trigger')}  持续{reg.get('since_days', '-')}日")
         except Exception as e:  # noqa: BLE001
             print(f"[{a['key']:5}] 取数/计算失败: {e}")
             reports.append({"key": a["key"], "label": a["label"],
                             "group": a.get("group", "其他"), "unit": a.get("unit", ""),
-                            "regime": {"state": "N/A", "reason": str(e)}})
+                            "regime": {"state": "N/A", "reason": str(e)},
+                            "weekly": {"state": "N/A"}, "gate": "na", "gate_note": ""})
 
     run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     subject = f"市场状态提醒 {run_at[:10]}"

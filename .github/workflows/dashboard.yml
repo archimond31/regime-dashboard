@@ -38,6 +38,8 @@ jobs:
           cp regime_dashboard.html dist/index.html
           # 状态快照：供下次构建对比「今日状态切换」与失败降级，随站点一起发布
           cp monitor_state.json dist/monitor_state.json 2>/dev/null || true
+          # 多周期验证报告（结论快照，不在 CI 内重算）
+          cp backtest_multi_tf.html dist/backtest_multi_tf.html 2>/dev/null || true
           ls -la dist/
 
       - name: Deploy to GitHub Pages

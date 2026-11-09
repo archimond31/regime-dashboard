@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>多周期共振·风险闸门验证</title>
+<style>
+ body{font-family:'Microsoft YaHei',Arial,sans-serif;color:#222;margin:0;background:#f5f6f8;}
+ .wrap{max-width:1120px;margin:0 auto;padding:24px 28px 60px;}
+ h1{font-size:22px;margin:0 0 4px;} h2{font-size:17px;margin:26px 0 8px;border-left:5px solid #3a7bd5;padding-left:10px;}
+ .sub{color:#888;font-size:13px;margin:0 0 16px;}
+ .verdict{background:#fff;border-left:6px solid #c00;border-radius:8px;padding:14px 18px;margin:0 0 18px;
+   box-shadow:0 1px 3px rgba(0,0,0,.08);}
+ .verdict b{color:#c00;font-size:16px;}
+ table{border-collapse:collapse;width:100%;background:#fff;border-radius:8px;overflow:hidden;
+   box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:13px;margin-bottom:10px;}
+ th,td{padding:7px 10px;border-bottom:1px solid #eee;text-align:right;}
+ th{background:#f0f2f5;text-align:right;font-weight:normal;color:#555;}
+ td:first-child,th:first-child{text-align:left;}
+ .note{font-size:12px;color:#777;line-height:1.7;background:#fff;border-radius:8px;padding:14px 18px;}
+</style></head><body><div class="wrap">
+<h1>多周期共振 · 风险闸门验证</h1>
+<p class="sub">全 18 品种｜样本中位 1651 个交易日/品种｜数据截至 2026-11-08｜
+周线参数 = 日线 ÷5 机械映射（MA24/MA12，零自由度）</p>
+
+<div class="verdict"><b>闸门假设被证伪：冲突格并无稳定的逆势劣势</b><br>
+冲突格更差成立率：多头侧 7/11、空头侧 5/11（合计 55%）；
+20 日对比中最小的 p 值为 0.592；
+闸门跑赢品种 9/18。</div>
+
+<h2>一、九宫格事件研究</h2>
+<table><tr><th>格子（日线/周线）</th><th>样本</th><th>5日原始</th><th>20日原始</th>
+<th>20日胜率</th><th>20日方向调整</th><th>调整后胜率</th></tr><tr><td style='text-align:left;'>日↑周↑ 共振多</td><td>3020</td><td>0.24%</td><td>0.63%</td><td>53.0%</td><td>0.63%</td><td>53.0%</td></tr><tr><td style='text-align:left;'>日↑周— 试探</td><td>274</td><td>-0.13%</td><td>1.03%</td><td>53.6%</td><td>1.03%</td><td>53.6%</td></tr><tr style="background:#fdecec;"><td style='text-align:left;'>日↑周↓ 冲突</td><td>5639</td><td>0.22%</td><td>0.19%</td><td>50.8%</td><td>0.19%</td><td>50.8%</td></tr><tr><td style='text-align:left;'>日—周↑ 回调</td><td>2097</td><td>0.20%</td><td>0.15%</td><td>50.7%</td><td>0.00%</td><td>0.0%</td></tr><tr><td style='text-align:left;'>日—周— 无向</td><td>383</td><td>-1.66%</td><td>-3.05%</td><td>32.1%</td><td>0.00%</td><td>0.0%</td></tr><tr><td style='text-align:left;'>日—周↓ 反弹</td><td>4318</td><td>0.28%</td><td>0.33%</td><td>51.1%</td><td>0.00%</td><td>0.0%</td></tr><tr style="background:#fdecec;"><td style='text-align:left;'>日↓周↑ 冲突</td><td>3364</td><td>-0.08%</td><td>-0.41%</td><td>47.7%</td><td>0.41%</td><td>52.3%</td></tr><tr><td style='text-align:left;'>日↓周— 试探</td><td>500</td><td>0.64%</td><td>0.96%</td><td>54.6%</td><td>-0.96%</td><td>45.4%</td></tr><tr><td style='text-align:left;'>日↓周↓ 共振空</td><td>8929</td><td>-0.07%</td><td>-0.03%</td><td>49.8%</td><td>0.03%</td><td>50.1%</td></tr></table>
+<p class="sub">方向调整 = 按日线信号交易的实际收益（UP 做多取原始收益、DOWN 做空取相反数、RANGE 空仓为 0）。
+红底行为冲突格。</p>
+
+<h2>二、关键对比（含显著性）</h2>
+<table><tr><th>前瞻</th><th>对比</th><th>冲突格</th><th>同向格</th><th>差</th><th>p 值</th><th>结论</th><th>非重叠 n</th></tr>
+<tr><td>10日</td><td style='text-align:left;'>日↑周↓ 冲突 − 日↑周↑ 共振多</td><td>0.19%</td><td>0.54%</td><td style='font-weight:bold;'>-0.34%</td><td>0.646</td><td style='color:#888;'>不显著</td><td>38/40</td></tr><tr><td>10日</td><td style='text-align:left;'>日↓周↑ 冲突 − 日↓周↓ 共振空</td><td>0.17%</td><td>0.13%</td><td style='font-weight:bold;'>+0.04%</td><td>0.159</td><td style='color:#888;'>不显著</td><td>32/60</td></tr><tr><td>20日</td><td style='text-align:left;'>日↑周↓ 冲突 − 日↑周↑ 共振多</td><td>0.19%</td><td>0.63%</td><td style='font-weight:bold;'>-0.44%</td><td>0.592</td><td style='color:#888;'>不显著</td><td>24/24</td></tr><tr><td>20日</td><td style='text-align:left;'>日↓周↑ 冲突 − 日↓周↓ 共振空</td><td>0.41%</td><td>0.03%</td><td style='font-weight:bold;'>+0.38%</td><td>0.745</td><td style='color:#888;'>不显著</td><td>20/36</td></tr></table>
+<p class="sub">p 值来自<b>非重叠子样本</b>的 Mann-Whitney U 检验（每 h 日取一点）。日频前瞻收益存在严重自相关，
+用全样本做检验会系统性夸大显著性，故只用于描述性中位数。</p>
+
+<h2>三、分段一致性（半年一段）</h2>
+<table><tr><th>区间</th><th>多头·冲突</th><th>多头·共振</th><th>差</th>
+<th>空头·冲突</th><th>空头·共振</th><th>差</th></tr><tr><td>2021H2</td><td>0.27%</td><td>0.76%</td><td style='color:#c00;'>-0.48%</td><td>1.13%</td><td>3.24%</td><td style='color:#1a7f37;'>+2.10%</td></tr><tr><td>2022H1</td><td>-6.74%</td><td>-6.50%</td><td style='color:#c00;'>-0.24%</td><td>-2.68%</td><td>-6.06%</td><td style='color:#c00;'>-3.38%</td></tr><tr><td>2022H2</td><td>-3.05%</td><td>-0.40%</td><td style='color:#c00;'>-2.65%</td><td>-0.86%</td><td>1.17%</td><td style='color:#1a7f37;'>+2.03%</td></tr><tr><td>2023H1</td><td>2.98%</td><td>-0.30%</td><td style='color:#1a7f37;'>+3.28%</td><td>0.59%</td><td>-1.12%</td><td style='color:#c00;'>-1.71%</td></tr><tr><td>2023H2</td><td>1.33%</td><td>2.94%</td><td style='color:#c00;'>-1.62%</td><td>-1.73%</td><td>0.09%</td><td style='color:#1a7f37;'>+1.82%</td></tr><tr><td>2024H1</td><td>1.52%</td><td>3.15%</td><td style='color:#c00;'>-1.63%</td><td>-0.50%</td><td>2.38%</td><td style='color:#1a7f37;'>+2.88%</td></tr><tr><td>2024H2</td><td>2.31%</td><td>2.08%</td><td style='color:#1a7f37;'>+0.23%</td><td>0.55%</td><td>2.59%</td><td style='color:#1a7f37;'>+2.04%</td></tr><tr><td>2025H1</td><td>4.18%</td><td>1.24%</td><td style='color:#1a7f37;'>+2.93%</td><td>-0.72%</td><td>-2.32%</td><td style='color:#c00;'>-1.60%</td></tr><tr><td>2025H2</td><td>0.98%</td><td>2.23%</td><td style='color:#c00;'>-1.24%</td><td>0.66%</td><td>-3.44%</td><td style='color:#c00;'>-4.10%</td></tr><tr><td>2026H1</td><td>-5.31%</td><td>-1.72%</td><td style='color:#c00;'>-3.59%</td><td>-1.10%</td><td>-2.38%</td><td style='color:#c00;'>-1.28%</td></tr><tr><td>2026H2</td><td>4.83%</td><td>-1.28%</td><td style='color:#1a7f37;'>+6.11%</td><td>-4.63%</td><td>4.29%</td><td style='color:#1a7f37;'>+8.92%</td></tr></table>
+<p class="sub">差为负（红）= 周线唱反调时收益更差 = 闸门有价值。若符号在不同时段来回翻转，说明没有稳定效应。</p>
+
+<h2>四、策略口径回测（闸门 vs 纯日线）</h2>
+<table><tr><th>品种</th><th>闸门收益</th><th>纯日线收益</th><th>增量</th>
+<th>闸门最大回撤</th><th>纯日线最大回撤</th><th>交易数(闸/日)</th><th>闸门胜率</th></tr><tr><td style='text-align:left;'>BTC 比特币</td><td>-38.7%</td><td>85.7%</td><td style='color:#c00;font-weight:bold;'>-124.5%</td><td>-73.7%</td><td>-65.0%</td><td>55/74</td><td>36.4%</td></tr><tr><td style='text-align:left;'>ETH 以太坊</td><td>62.9%</td><td>-43.4%</td><td style='color:#1a7f37;font-weight:bold;'>+106.3%</td><td>-64.7%</td><td>-84.0%</td><td>43/75</td><td>44.2%</td></tr><tr><td style='text-align:left;'>SOL Solana</td><td>392.9%</td><td>1122.8%</td><td style='color:#c00;font-weight:bold;'>-729.9%</td><td>-77.1%</td><td>-80.0%</td><td>51/75</td><td>37.3%</td></tr><tr><td style='text-align:left;'>BNB</td><td>-76.4%</td><td>-72.6%</td><td style='color:#c00;font-weight:bold;'>-3.8%</td><td>-86.0%</td><td>-84.6%</td><td>46/85</td><td>34.8%</td></tr><tr><td style='text-align:left;'>XRP 瑞波</td><td>-46.3%</td><td>-81.8%</td><td style='color:#1a7f37;font-weight:bold;'>+35.5%</td><td>-74.9%</td><td>-94.2%</td><td>44/68</td><td>36.4%</td></tr><tr><td style='text-align:left;'>AAVE</td><td>-62.5%</td><td>-67.5%</td><td style='color:#1a7f37;font-weight:bold;'>+4.9%</td><td>-88.7%</td><td>-91.1%</td><td>30/59</td><td>26.7%</td></tr><tr><td style='text-align:left;'>LINK Chainlink</td><td>-74.3%</td><td>-65.6%</td><td style='color:#c00;font-weight:bold;'>-8.7%</td><td>-86.7%</td><td>-93.9%</td><td>44/79</td><td>29.5%</td></tr><tr><td style='text-align:left;'>HYPE Hyperliquid</td><td>-83.7%</td><td>-87.2%</td><td style='color:#1a7f37;font-weight:bold;'>+3.5%</td><td>-88.0%</td><td>-90.8%</td><td>14/22</td><td>28.6%</td></tr><tr><td style='text-align:left;'>CRV Curve</td><td>-85.4%</td><td>-98.8%</td><td style='color:#1a7f37;font-weight:bold;'>+13.4%</td><td>-94.3%</td><td>-99.6%</td><td>40/86</td><td>37.5%</td></tr><tr><td style='text-align:left;'>UNI Uniswap</td><td>-60.0%</td><td>-45.5%</td><td style='color:#c00;font-weight:bold;'>-14.6%</td><td>-77.1%</td><td>-80.0%</td><td>41/80</td><td>36.6%</td></tr><tr><td style='text-align:left;'>黄金 GC 期货</td><td>1.0%</td><td>10.9%</td><td style='color:#c00;font-weight:bold;'>-9.9%</td><td>-25.3%</td><td>-21.3%</td><td>47/77</td><td>27.7%</td></tr><tr><td style='text-align:left;'>白银 SI 期货</td><td>-59.2%</td><td>-82.2%</td><td style='color:#1a7f37;font-weight:bold;'>+23.0%</td><td>-69.0%</td><td>-85.9%</td><td>46/69</td><td>39.1%</td></tr><tr><td style='text-align:left;'>铜 HG 期货</td><td>17.1%</td><td>-3.7%</td><td style='color:#1a7f37;font-weight:bold;'>+20.9%</td><td>-22.8%</td><td>-38.1%</td><td>32/54</td><td>37.5%</td></tr><tr><td style='text-align:left;'>WTI 原油 CL</td><td>15.7%</td><td>117.8%</td><td style='color:#c00;font-weight:bold;'>-102.1%</td><td>-40.3%</td><td>-46.2%</td><td>34/39</td><td>41.2%</td></tr><tr><td style='text-align:left;'>布伦特原油 BZ</td><td>-14.3%</td><td>-3.4%</td><td style='color:#c00;font-weight:bold;'>-11.0%</td><td>-38.4%</td><td>-52.7%</td><td>34/63</td><td>35.3%</td></tr><tr><td style='text-align:left;'>纳指 QQQ</td><td>-23.4%</td><td>-28.5%</td><td style='color:#1a7f37;font-weight:bold;'>+5.1%</td><td>-45.0%</td><td>-49.7%</td><td>41/60</td><td>39.0%</td></tr><tr><td style='text-align:left;'>标普 SPY</td><td>0.9%</td><td>46.5%</td><td style='color:#c00;font-weight:bold;'>-45.6%</td><td>-13.6%</td><td>-12.8%</td><td>46/61</td><td>41.3%</td></tr><tr><td style='text-align:left;'>美债 TLT</td><td>-17.1%</td><td>-21.5%</td><td style='color:#1a7f37;font-weight:bold;'>+4.4%</td><td>-25.9%</td><td>-33.1%</td><td>31/53</td><td>29.0%</td></tr></table>
+<p class="sub">口径：日线 UP 做多、DOWN 做空、RANGE 空仓；闸门版额外把「周线反向」的仓位归零。
+满仓多空、无杠杆、无成本。<b>这套口径的绝对收益本身不具参考性</b>——状态机是市场分类工具，不是交易系统；
+长期上涨品种上做空必然亏损。此处只看<b>相对增量</b>。</p>
+
+<h2>五、方法与局限</h2>
+<div class="note">
+<b>无未来函数</b>：第 i 天的周线状态取「最后一根 date ≤ 该日的周线」。周线 bar 的日期是该周最后交易日，
+该状态在该日收盘即已知。当前未走完的周一律剔除。<br>
+<b>参数零自由度</b>：周线 MA24/MA12 是日线 120/60 的 ÷5 机械映射，不参与任何搜索，因此不存在「调参调出来的好结果」。<br>
+<b>重叠样本</b>：5/10/20 日前瞻收益在相邻日高度重叠，描述统计用全样本，显著性检验用非重叠子样本。<br>
+<b>样本跨度</b>：2021-07-01 ~ 2026-11-08，覆盖 2021-2022 熊市、2023-2024 牛市、2025-2026 震荡，
+跨周期而非单一行情。<br>
+<b>已知混杂</b>：商品用期货连续价（未做换月复权），换月跳空会污染周线收盘；HYPE 周线样本仅约
+583 个交易日。<br>
+<b>本报告为规则化验证，非投资建议。</b>
+</div>
+</div></body></html>
