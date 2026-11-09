@@ -62,7 +62,7 @@ ASSETS = [
     {"key": "LINK", "label": "LINK Chainlink","group": "加密", "source": "yahoo", "symbol": "LINK-USD"},
     {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE"},
     {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "yahoo", "symbol": "CRV-USD"},
-    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "yahoo", "symbol": "UNI-USD"},
+    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "yahoo", "symbol": "UNI7083-USD"},
     # 贵金属（Yahoo COMEX 期货连续，美元/盎司）
     {"key": "GOLD", "label": "黄金 GC 期货",  "group": "贵金属", "source": "yahoo", "symbol": "GC=F"},
     {"key": "SLV",  "label": "白银 SI 期货",  "group": "贵金属", "source": "yahoo", "symbol": "SI=F"},
