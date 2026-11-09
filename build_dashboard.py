@@ -4,17 +4,23 @@
 build_dashboard.py —— 市场趋势监控面板（自包含 HTML，含交互）
 
 内容：
-  1) 状态统计卡片：上升/震荡/下降数量 + 四组（加密/贵金属/商品能源/宏观）分布
-  2) 当前状态总览：18 品种分四组，含状态、收盘、RSI14、MA60、MA120、触发日期、原因、持续
-  3) 各品种 2024 年以来趋势区间图：状态色带 + 价格折线 + 背离标记 + 可折叠区间明细
-  4) 交互：分组 tab 筛选、状态筛选（原生 JS，无需外部依赖）
+  1) 状态统计卡片：上升/震荡/下降数量 + 分组分布
+  2) 今日状态切换提示（对比上一次部署的 monitor_state.json）
+  3) 当前状态总览：18 品种分三组，含 状态/收盘(带单位)/RSI14/MA60/MA120/触发日期/原因/持续
+  4) 各品种 2024 年以来趋势区间图：状态色带 + 价格折线 + 背离标记 + 可折叠区间明细
+  5) 交互：分组 tab + 状态筛选（原生 JS，无外部依赖）
+  6) 容错：某品种取数失败时沿用上次成功数据（monitor_state.json），并标注「沿用旧数据」
 
-复用 G 方案状态机（daily_states）与可视化函数（gen_svg / seg_table）。
-数据源：Binance 现货 / Yahoo ETF·期货 / Hyperliquid（HYPE）。
-代理开关：本地默认走 127.0.0.1:10809；云端设 REGIME_PROXY=none 直连。
-用法：python build_dashboard.py  →  生成 regime_dashboard.html
+数据源：Hyperliquid 永续（加密）/ Yahoo 期货·ETF（商品、宏观）。
+代理开关：本地默认 127.0.0.1:10809；云端设 REGIME_PROXY=none 直连。
+快照：构建时读 {Pages}/monitor_state.json（上次部署）做「今日切换」对比与失败降级，
+      构建后写 monitor_state.json，由 workflow 一并部署到 gh-pages。
+用法：python build_dashboard.py  →  生成 regime_dashboard.html + monitor_state.json
 """
 import bisect
+import json
+import os
+import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -29,6 +35,46 @@ from daily_regime_alert import (
 
 MIN_DAYS = 3
 OUT = "regime_dashboard.html"
+STATE_FILE = "monitor_state.json"
+
+
+def _snapshot_url():
+    """上次部署的 monitor_state.json 地址。云端用 GITHUB_REPOSITORY 推导，本地可用 PAGES_SNAPSHOT_URL 覆盖。"""
+    explicit = os.environ.get("PAGES_SNAPSHOT_URL")
+    if explicit:
+        return explicit
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if repo and "/" in repo:
+        owner, name = repo.split("/", 1)
+        return f"https://{owner}.github.io/{name}/{STATE_FILE}"
+    return ""
+
+
+def fetch_prev_state():
+    """读取上次部署的状态快照；失败/首跑返回 {}（不阻断构建）。"""
+    url = _snapshot_url()
+    if not url:
+        # 本地无 GITHUB_REPOSITORY：回退读同目录快照，便于本地验证「今日切换」
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, encoding="utf-8") as f:
+                    data = json.load(f)
+                assets = data.get("assets", {})
+                print(f"[快照] 本地快照：{len(assets)} 个品种（更新于 {data.get('updated', '?')}）")
+                return assets
+            except Exception as e:  # noqa: BLE001
+                print(f"[快照] 本地快照解析失败：{e}")
+        return {}
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "regime-dashboard"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        assets = data.get("assets", {})
+        print(f"[快照] 已读取上次状态：{len(assets)} 个品种（更新于 {data.get('updated', '?')}）")
+        return assets
+    except Exception as e:  # noqa: BLE001
+        print(f"[快照] 读取上次状态失败（首跑属正常）：{e}")
+        return {}
 
 
 def fetch_asset(a, warm_dt):
@@ -51,8 +97,11 @@ def render_summary(summary):
         for s in groups[g]:
             state = s["regime"]["state"]
             color = STATE_COLOR.get(state, "#888")
+            unit = s.get("unit", "")
+            stale = (" <span style='color:#c00;font-size:11px;'>⚠️沿用旧数据</span>"
+                     if s.get("stale") else "")
             trs += (
-                f"<tr><td>{s['label']}</td>"
+                f"<tr><td>{s['label']} <span style='color:#999;font-size:11px;'>{unit}</span>{stale}</td>"
                 f"<td style='background:{color};color:#fff;font-weight:bold;text-align:center;'>"
                 f"{STATE_CN.get(state, state)}</td>"
                 f"<td style='text-align:right;'>{fmt_price(s['regime'].get('close'))}</td>"
@@ -71,7 +120,7 @@ def render_summary(summary):
 
 
 def render_stats(summary):
-    """状态统计卡片：整体 + 四组分布。"""
+    """状态统计卡片：整体 + 分组分布。"""
     total = Counter()
     grp = {}
     for s in summary:
@@ -109,10 +158,23 @@ def render_tabs():
             f"<div class='tabbar'>状态：{sbtns}</div>")
 
 
+def render_changes(changes):
+    """今日状态切换提示条。"""
+    if not changes:
+        return "<div class='changes none'>今日无状态切换</div>"
+    items = "".join(
+        f"<span class='chg'>{c['label']} <b>{STATE_CN.get(c['from'], c['from'])}→{STATE_CN.get(c['to'], c['to'])}</b></span>"
+        for c in changes)
+    return f"<div class='changes'><b>今日状态切换（{len(changes)}）</b> {items}</div>"
+
+
 def main():
     warm_dt = datetime.strptime(WARM_START, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    prev_assets = fetch_prev_state()
     summary = []
     cards = []
+    changes = []
+    new_state = {}
 
     for a in ASSETS:
         try:
@@ -120,6 +182,11 @@ def main():
             dates = [r["date"] for r in rows]
             closes = [r["close"] for r in rows]
             reg = compute_regime(closes, dates)
+            # 今日状态切换对比（仅对有上次记录且状态变化的品种）
+            prev = prev_assets.get(a["key"])
+            if prev and prev.get("state") and prev["state"] != reg["state"]:
+                changes.append({"label": a["label"], "from": prev["state"], "to": reg["state"]})
+
             s0 = bisect.bisect_left(dates, START)
             if s0 < 120:
                 s0 = 120
@@ -140,18 +207,35 @@ def main():
             cards.append({
                 "label": a["label"], "group": a["group"], "state": state, "color": color,
                 "svg": gen_svg(pts, segs, marks), "table": seg_table(segs), "n_seg": len(segs),
-                "raw_n": raw_n, "merged": raw_n - len(segs), "as_of": dates[-1],
+                "raw_n": raw_n, "merged": raw_n - len(segs), "as_of": dates[-1], "stale": False,
             })
-            summary.append({"label": a["label"], "group": a["group"], "regime": reg})
+            summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
+                            "unit": a.get("unit", ""), "regime": reg, "stale": False})
+            new_state[a["key"]] = reg
             print(f"[{a['key']:5}] {STATE_CN.get(state, state):3}  {len(segs)} 个区间"
                   f"（合并 {raw_n - len(segs)} 个碎片）  {dates[-1]}")
         except Exception as e:  # noqa: BLE001
-            print(f"[{a['key']:5}] 失败: {e}")
-            cards.append({"label": a["label"], "group": a["group"], "state": "N/A",
-                          "color": "#888", "svg": "<p style='color:#999'>取数/计算失败</p>",
-                          "table": "", "n_seg": 0, "raw_n": 0, "merged": 0, "as_of": "-"})
-            summary.append({"label": a["label"], "group": a["group"],
-                            "regime": {"state": "N/A", "reason": str(e)}})
+            prev = prev_assets.get(a["key"])
+            if prev:
+                # 降级：沿用上次成功数据（不纳入今日切换）
+                st_state = prev.get("state", "N/A")
+                summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
+                                "unit": a.get("unit", ""), "regime": prev, "stale": True})
+                new_state[a["key"]] = prev
+                cards.append({"label": a["label"], "group": a["group"], "state": st_state,
+                              "color": STATE_COLOR.get(st_state, "#888"),
+                              "svg": f"<p style='color:#c00;padding:8px;'>本次抓取失败，沿用 {prev.get('as_of', '')} 的数据</p>",
+                              "table": "", "n_seg": 0, "raw_n": 0, "merged": 0,
+                              "as_of": prev.get("as_of", "-"), "stale": True})
+                print(f"[{a['key']:5}] 失败→沿用旧数据({prev.get('as_of')}): {e}")
+            else:
+                print(f"[{a['key']:5}] 失败(无历史): {e}")
+                cards.append({"label": a["label"], "group": a["group"], "state": "N/A",
+                              "color": "#888", "svg": "<p style='color:#999'>取数/计算失败</p>",
+                              "table": "", "n_seg": 0, "raw_n": 0, "merged": 0, "as_of": "-", "stale": False})
+                summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
+                                "unit": a.get("unit", ""),
+                                "regime": {"state": "N/A", "reason": str(e)}, "stale": False})
 
     card_groups = {}
     for c in cards:
@@ -164,17 +248,22 @@ def main():
         for c in card_groups[g]:
             merged_note = (f" <span class='muted'>（合并 {c['merged']} 个 &lt;{MIN_DAYS}天碎片）</span>"
                            if c["merged"] else "")
+            stale_badge = " <span style='color:#c00;font-size:12px;'>⚠️沿用旧数据</span>" if c.get("stale") else ""
             card_blocks += (
                 f"<div class='card' data-group='{c['group']}' data-state='{c['state']}'>"
                 f"<div class='card-head'><span class='name'>{c['label']}</span>"
                 f"<span class='badge' style='background:{c['color']};'>{STATE_CN.get(c['state'], c['state'])}</span>"
-                f"<span class='muted' style='margin-left:8px;'>截至 {c['as_of']}{merged_note}</span></div>"
+                f"<span class='muted' style='margin-left:8px;'>截至 {c['as_of']}{merged_note}</span>{stale_badge}</div>"
                 f"{c['svg']}"
-                f"<details><summary>查看区间明细（{c['n_seg']} 个区间）</summary>{c['table']}</details>"
-                f"</div>")
+                + (f"<details><summary>查看区间明细（{c['n_seg']} 个区间）</summary>{c['table']}</details>"
+                   if c["n_seg"] else "")
+                + "</div>")
 
     run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     n_total = len(ASSETS)
+    n_stale = sum(1 for s in summary if s.get("stale"))
+    stale_note = (f"｜<span style='color:#c00;'>{n_stale} 个品种沿用旧数据</span>"
+                  if n_stale else "")
     html = f"""<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>市场趋势监控面板</title>
@@ -183,6 +272,11 @@ def main():
   .wrap {{ max-width:1240px; margin:0 auto; padding:20px 24px 60px; }}
   h1 {{ margin:0 0 4px; font-size:24px; }}
   .sub {{ color:#888; margin:0 0 16px; font-size:13px; }}
+  .changes {{ background:#fff7e6; border-left:5px solid #d98a00; border-radius:8px; padding:10px 14px;
+    margin:0 0 14px; font-size:13px; }}
+  .changes.none {{ background:#f2f6f2; border-left-color:#4a9e4a; color:#666; }}
+  .changes .chg {{ display:inline-block; background:#fff; border:1px solid #e6c98a; border-radius:12px;
+    padding:2px 10px; margin:3px 4px 0 0; }}
   .stats {{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 16px; }}
   .sc {{ background:#fff; border-radius:10px; padding:10px 16px; box-shadow:0 1px 3px rgba(0,0,0,.08); }}
   .sc.main {{ border-left:5px solid #3a7bd5; }}
@@ -216,8 +310,9 @@ def main():
 </style></head>
 <body><div class="wrap">
   <h1>市场趋势监控面板</h1>
-  <p class="sub">生成时间：{run_at}（北京时间）｜监控 {n_total} 个品种｜红=上升 / 黄=震荡 / 绿=下降（国内配色）</p>
+  <p class="sub">生成时间：{run_at}（北京时间）｜监控 {n_total} 个品种｜红=上升 / 黄=震荡 / 绿=下降（国内配色）{stale_note}</p>
 
+  {render_changes(changes)}
   {render_stats(summary)}
   {render_tabs()}
 
@@ -233,7 +328,7 @@ def main():
     判定规则（日线状态机 G 方案）：MA120 初始化定方向 → 趋势中 RSI 连续 2 日站上 70/30 后回落离开极值转震荡 →
     震荡中 MA60 穿越或 RSI 再触发回趋势；叠加 RSI 背离（最高优先级）、反向穿越纠错、背离失败检测。
     短历史品种（如 HYPE）自动用「数据起点 + 120 根热身」动态起点。<br>
-    本面板为规则化市场状态分类，非投资建议。数据源：Binance / Yahoo Finance / Hyperliquid。
+    本面板为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）。
   </div>
 </div>
 <script>
@@ -265,6 +360,15 @@ def main():
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nWrote {OUT}")
+
+    # 写状态快照（供下次构建做今日切换对比与失败降级）
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+                       "assets": new_state}, f, ensure_ascii=False, indent=1)
+        print(f"Wrote {STATE_FILE}（{len(new_state)} 个品种）")
+    except Exception as e:  # noqa: BLE001
+        print(f"[快照] 写入失败：{e}")
 
 
 if __name__ == "__main__":

@@ -50,27 +50,27 @@ START = "2024-01-01"      # 策略判定起点（与可视化一致）
 WARM_START = "2023-06-01"  # 数据起点（供 MA120 热身 120+ 根）
 
 ASSETS = [
-    # 加密（Hyperliquid 永续合约日线；统一源，无地域封锁、无 key、无限流）
-    {"key": "BTC",  "label": "BTC 比特币",    "group": "加密", "source": "hyperliquid", "symbol": "BTC"},
-    {"key": "ETH",  "label": "ETH 以太坊",    "group": "加密", "source": "hyperliquid", "symbol": "ETH"},
-    {"key": "SOL",  "label": "SOL Solana",    "group": "加密", "source": "hyperliquid", "symbol": "SOL"},
-    {"key": "BNB",  "label": "BNB",           "group": "加密", "source": "hyperliquid", "symbol": "BNB"},
-    {"key": "XRP",  "label": "XRP 瑞波",      "group": "加密", "source": "hyperliquid", "symbol": "XRP"},
-    {"key": "AAVE", "label": "AAVE",          "group": "加密", "source": "hyperliquid", "symbol": "AAVE"},
-    {"key": "LINK", "label": "LINK Chainlink","group": "加密", "source": "hyperliquid", "symbol": "LINK"},
-    {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE"},
-    {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "hyperliquid", "symbol": "CRV"},
-    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "hyperliquid", "symbol": "UNI"},
-    # 商品（Yahoo 期货连续：黄金/白银/铜/WTI/布伦特，美元计价）
-    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "商品", "source": "yahoo", "symbol": "GC=F"},
-    {"key": "SI",   "label": "白银 SI 期货",  "group": "商品", "source": "yahoo", "symbol": "SI=F"},
-    {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F"},
-    {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F"},
-    {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F"},
+    # 加密（Hyperliquid 永续合约日线；统一源，无地域封锁、无 key、无限流；USD/枚）
+    {"key": "BTC",  "label": "BTC 比特币",    "group": "加密", "source": "hyperliquid", "symbol": "BTC",  "unit": "USD/枚"},
+    {"key": "ETH",  "label": "ETH 以太坊",    "group": "加密", "source": "hyperliquid", "symbol": "ETH",  "unit": "USD/枚"},
+    {"key": "SOL",  "label": "SOL Solana",    "group": "加密", "source": "hyperliquid", "symbol": "SOL",  "unit": "USD/枚"},
+    {"key": "BNB",  "label": "BNB",           "group": "加密", "source": "hyperliquid", "symbol": "BNB",  "unit": "USD/枚"},
+    {"key": "XRP",  "label": "XRP 瑞波",      "group": "加密", "source": "hyperliquid", "symbol": "XRP",  "unit": "USD/枚"},
+    {"key": "AAVE", "label": "AAVE",          "group": "加密", "source": "hyperliquid", "symbol": "AAVE", "unit": "USD/枚"},
+    {"key": "LINK", "label": "LINK Chainlink","group": "加密", "source": "hyperliquid", "symbol": "LINK", "unit": "USD/枚"},
+    {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE", "unit": "USD/枚"},
+    {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "hyperliquid", "symbol": "CRV",  "unit": "USD/枚"},
+    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "hyperliquid", "symbol": "UNI",  "unit": "USD/枚"},
+    # 商品（Yahoo 期货连续）
+    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "商品", "source": "yahoo", "symbol": "GC=F", "unit": "美元/盎司"},
+    {"key": "SI",   "label": "白银 SI 期货",  "group": "商品", "source": "yahoo", "symbol": "SI=F", "unit": "美元/盎司"},
+    {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F", "unit": "美元/磅"},
+    {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F", "unit": "美元/桶"},
+    {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F", "unit": "美元/桶"},
     # 宏观（Yahoo ETF）
-    {"key": "QQQ",  "label": "纳指 QQQ",      "group": "宏观", "source": "yahoo", "symbol": "QQQ"},
-    {"key": "SPY",  "label": "标普 SPY",      "group": "宏观", "source": "yahoo", "symbol": "SPY"},
-    {"key": "TLT",  "label": "美债 TLT",      "group": "宏观", "source": "yahoo", "symbol": "TLT"},
+    {"key": "QQQ",  "label": "纳指 QQQ",      "group": "宏观", "source": "yahoo", "symbol": "QQQ", "unit": "美元"},
+    {"key": "SPY",  "label": "标普 SPY",      "group": "宏观", "source": "yahoo", "symbol": "SPY", "unit": "美元"},
+    {"key": "TLT",  "label": "美债 TLT",      "group": "宏观", "source": "yahoo", "symbol": "TLT", "unit": "美元"},
 ]
 
 GROUP_ORDER = ["加密", "商品", "宏观"]
@@ -303,7 +303,7 @@ def _render_table(rows):
         color = STATE_COLOR.get(state, "#888")
         trs += (
             f"<tr>"
-            f"<td>{r['label']}</td>"
+            f"<td>{r['label']} <span style='color:#999;font-size:11px;'>{r.get('unit','')}</span></td>"
             f"<td style='background:{color};color:#fff;font-weight:bold;text-align:center;'>"
             f"{STATE_CN.get(state, state)}</td>"
             f"<td style='text-align:right;'>{fmt_price(r['regime'].get('close'))}</td>"
@@ -347,7 +347,7 @@ def render_html(reports, run_at):
     震荡中收盘上穿 MA60 转上升、下穿转下降，或 RSI 连续 2 日重新站上 70/跌破 30（再触发）。
     叠加日线 RSI 背离（顶背离切下降、底背离切上升，最高优先级）、反向穿越纠错、背离失败检测。
   </p>
-  <p style="font-size:12px;color:#999;">本提醒为规则化市场状态分类，非投资建议。数据源：Binance / Yahoo Finance。</p>
+  <p style="font-size:12px;color:#999;">本提醒为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）。</p>
 </body></html>"""
     return html
 
@@ -399,14 +399,15 @@ def main():
             dates = [r["date"] for r in rows]
             reg = compute_regime(closes, dates)
             reports.append({"key": a["key"], "label": a["label"],
-                            "group": a.get("group", "其他"), "regime": reg})
+                            "group": a.get("group", "其他"), "unit": a.get("unit", ""),
+                            "regime": reg})
             print(f"[{a['key']:5}] {STATE_CN.get(reg['state'], reg['state']):3}  "
                   f"close={reg.get('close', 0):,.4f}  RSI={reg.get('rsi', 0):.1f}  "
                   f"as_of={reg.get('as_of')}  触发={reg.get('trigger')}  持续{reg.get('since_days', '-')}日")
         except Exception as e:  # noqa: BLE001
             print(f"[{a['key']:5}] 取数/计算失败: {e}")
             reports.append({"key": a["key"], "label": a["label"],
-                            "group": a.get("group", "其他"),
+                            "group": a.get("group", "其他"), "unit": a.get("unit", ""),
                             "regime": {"state": "N/A", "reason": str(e)}})
 
     run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
