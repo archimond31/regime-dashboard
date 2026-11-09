@@ -1,8 +1,10 @@
 name: Build Regime Dashboard
 
 on:
+  push:
+    branches: [main]          # 首次推送 / 代码更新即触发，立即构建部署
   schedule:
-    # 每天 UTC 13:30 = 北京时间 21:30（美股盘中，覆盖当日完整日线）
+    # 每天 UTC 13:30 = 北京时间 21:30（覆盖当日完整日线）
     - cron: '30 13 * * *'
   workflow_dispatch: {}
 
