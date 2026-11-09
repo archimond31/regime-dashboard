@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   build:
@@ -40,3 +41,19 @@ jobs:
           publish_branch: gh-pages
           force_orphan: true
           enable_jekyll: false
+
+      - name: Enable GitHub Pages (自动开启)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          resp=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/pages \
+            -d '{"source":{"branch":"gh-pages","path":"/"}}')
+          echo "$resp"
+          code=$(echo "$resp" | tail -n1)
+          if [ "$code" != "201" ] && [ "$code" != "200" ] && [ "$code" != "409" ]; then
+            echo "::warning::开启 Pages 返回 HTTP $code（若失败可手动 Settings→Pages→Deploy from a branch→gh-pages）"
+          fi
