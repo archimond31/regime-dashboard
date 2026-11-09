@@ -1,13 +1,12 @@
 # regime-dashboard — 市场趋势状态机监控面板
 
-基于 **G 方案**（MA120 初始化 + RSI 阈值 30/70 + 两日确认 + 背离信号 + 背离失败检测）的日线趋势状态机，覆盖 18 个品种，四类分组：
+基于 **G 方案**（MA120 初始化 + RSI 阈值 30/70 + 两日确认 + 背离信号 + 背离失败检测）的日线趋势状态机，覆盖 18 个品种，三类分组：
 
 | 分组 | 品种 |
 | --- | --- |
-| 加密 | BTC、ETH、SOL、BNB、XRP、AAVE、LINK、HYPE、CRV、UNI |
-| 贵金属 | 黄金（COMEX GC=F）、白银（COMEX SI=F） |
-| 商品能源 | 原油（USO）、铜（CPER）、天然气（UNG） |
-| 宏观 | 纳指（QQQ）、标普（SPY）、长债（TLT） |
+| 加密 | BTC、ETH、SOL、BNB、XRP、AAVE、LINK、HYPE、CRV、UNI（Hyperliquid 永续） |
+| 商品 | 黄金 GC=F、白银 SI=F、铜 HG=F、WTI 原油 CL=F、布伦特 BZ=F（Yahoo 期货） |
+| 宏观 | 纳指 QQQ、标普 SPY、长债 TLT |
 
 ## 状态定义
 
@@ -16,8 +15,8 @@
 
 ## 数据源
 
-- 加密：Binance 现货（分页）、HYPE 走 Hyperliquid 原生 API
-- 贵金属 / ETF：Yahoo Finance（期货连续 / ETF）
+- 加密：Hyperliquid 永续合约（candleSnapshot 原生 API，免地域封锁/免限流）
+- 商品 / 宏观：Yahoo Finance（期货连续 / ETF）
 - 代理开关：本地默认 `127.0.0.1:10809`，云端（GitHub Actions）设 `REGIME_PROXY=none` 直连
 
 ## 文件结构

@@ -61,20 +61,19 @@ ASSETS = [
     {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE"},
     {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "hyperliquid", "symbol": "CRV"},
     {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "hyperliquid", "symbol": "UNI"},
-    # 贵金属（Yahoo COMEX 期货连续，美元/盎司）
-    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "贵金属", "source": "yahoo", "symbol": "GC=F"},
-    {"key": "SLV",  "label": "白银 SI 期货",  "group": "贵金属", "source": "yahoo", "symbol": "SI=F"},
-    # 商品能源（Yahoo ETF）
-    {"key": "UNG",  "label": "天然气 UNG",    "group": "商品能源", "source": "yahoo", "symbol": "UNG"},
-    {"key": "USO",  "label": "原油 WTI USO",  "group": "商品能源", "source": "yahoo", "symbol": "USO"},
-    {"key": "CPER", "label": "铜 CPER",       "group": "商品能源", "source": "yahoo", "symbol": "CPER"},
+    # 商品（Yahoo 期货连续：黄金/白银/铜/WTI/布伦特，美元计价）
+    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "商品", "source": "yahoo", "symbol": "GC=F"},
+    {"key": "SI",   "label": "白银 SI 期货",  "group": "商品", "source": "yahoo", "symbol": "SI=F"},
+    {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F"},
+    {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F"},
+    {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F"},
     # 宏观（Yahoo ETF）
     {"key": "QQQ",  "label": "纳指 QQQ",      "group": "宏观", "source": "yahoo", "symbol": "QQQ"},
     {"key": "SPY",  "label": "标普 SPY",      "group": "宏观", "source": "yahoo", "symbol": "SPY"},
     {"key": "TLT",  "label": "美债 TLT",      "group": "宏观", "source": "yahoo", "symbol": "TLT"},
 ]
 
-GROUP_ORDER = ["加密", "贵金属", "商品能源", "宏观"]
+GROUP_ORDER = ["加密", "商品", "宏观"]
 
 
 # ---------------- 取数 ----------------
