@@ -1,0 +1,40 @@
+name: Build Regime Dashboard
+
+on:
+  schedule:
+    # 每天 UTC 13:30 = 北京时间 21:30（美股盘中，覆盖当日完整日线）
+    - cron: '30 13 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build dashboard
+        env:
+          REGIME_PROXY: none   # GitHub 云端直连，不走本地代理
+        run: |
+          python build_dashboard.py
+          mkdir -p dist
+          cp regime_dashboard.html dist/index.html
+          ls -la dist/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: dist
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: false

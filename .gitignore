@@ -1,0 +1,24 @@
+# 研究实验文件不入库，只保留云端监控 + 部署所需文件
+*
+
+# 重新包含目录（让 git 能进入子目录）
+!*/
+
+# 云端监控核心脚本
+!visualize_btc_regime.py
+!visualize_eth_gold_regime.py
+!daily_regime_alert.py
+!build_dashboard.py
+
+# CI/CD 部署
+!.github/
+!.github/workflows/
+!.github/workflows/dashboard.yml
+
+# 项目说明与规则
+!README.md
+!.gitignore
+
+# 生成的产物（Actions 每次重新生成）
+regime_dashboard.html
+*.html
