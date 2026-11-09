@@ -50,19 +50,17 @@ START = "2024-01-01"      # 策略判定起点（与可视化一致）
 WARM_START = "2023-06-01"  # 数据起点（供 MA120 热身 120+ 根）
 
 ASSETS = [
-    # 加密（Yahoo 加密货币日线 XXX-USD；HYPE 用 Hyperliquid）
-    # 说明：api.binance.com 对美国 IP 返回 451，云端 GitHub runner 被地域封锁；
-    #       故加密统一走 Yahoo 报价（与贵金属/宏观同源，云端已实测可用）。
-    {"key": "BTC",  "label": "BTC 比特币",    "group": "加密", "source": "yahoo", "symbol": "BTC-USD"},
-    {"key": "ETH",  "label": "ETH 以太坊",    "group": "加密", "source": "yahoo", "symbol": "ETH-USD"},
-    {"key": "SOL",  "label": "SOL Solana",    "group": "加密", "source": "yahoo", "symbol": "SOL-USD"},
-    {"key": "BNB",  "label": "BNB",           "group": "加密", "source": "yahoo", "symbol": "BNB-USD"},
-    {"key": "XRP",  "label": "XRP 瑞波",      "group": "加密", "source": "yahoo", "symbol": "XRP-USD"},
-    {"key": "AAVE", "label": "AAVE",          "group": "加密", "source": "yahoo", "symbol": "AAVE-USD"},
-    {"key": "LINK", "label": "LINK Chainlink","group": "加密", "source": "yahoo", "symbol": "LINK-USD"},
+    # 加密（Hyperliquid 永续合约日线；统一源，无地域封锁、无 key、无限流）
+    {"key": "BTC",  "label": "BTC 比特币",    "group": "加密", "source": "hyperliquid", "symbol": "BTC"},
+    {"key": "ETH",  "label": "ETH 以太坊",    "group": "加密", "source": "hyperliquid", "symbol": "ETH"},
+    {"key": "SOL",  "label": "SOL Solana",    "group": "加密", "source": "hyperliquid", "symbol": "SOL"},
+    {"key": "BNB",  "label": "BNB",           "group": "加密", "source": "hyperliquid", "symbol": "BNB"},
+    {"key": "XRP",  "label": "XRP 瑞波",      "group": "加密", "source": "hyperliquid", "symbol": "XRP"},
+    {"key": "AAVE", "label": "AAVE",          "group": "加密", "source": "hyperliquid", "symbol": "AAVE"},
+    {"key": "LINK", "label": "LINK Chainlink","group": "加密", "source": "hyperliquid", "symbol": "LINK"},
     {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE"},
-    {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "yahoo", "symbol": "CRV-USD"},
-    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "yahoo", "symbol": "UNI7083-USD"},
+    {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "hyperliquid", "symbol": "CRV"},
+    {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "hyperliquid", "symbol": "UNI"},
     # 贵金属（Yahoo COMEX 期货连续，美元/盎司）
     {"key": "GOLD", "label": "黄金 GC 期货",  "group": "贵金属", "source": "yahoo", "symbol": "GC=F"},
     {"key": "SLV",  "label": "白银 SI 期货",  "group": "贵金属", "source": "yahoo", "symbol": "SI=F"},
