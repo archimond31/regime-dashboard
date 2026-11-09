@@ -37,7 +37,7 @@ import urllib.error
 from email.header import Header
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from visualize_btc_regime import daily_states, PROXY
 
@@ -74,16 +74,31 @@ ASSETS = [
     {"key": "QQQ",  "label": "纳指 QQQ",      "group": "宏观", "source": "yahoo", "symbol": "QQQ", "unit": "美元"},
     {"key": "SPY",  "label": "标普 SPY",      "group": "宏观", "source": "yahoo", "symbol": "SPY", "unit": "美元"},
     {"key": "TLT",  "label": "美债 TLT",      "group": "宏观", "source": "yahoo", "symbol": "TLT", "unit": "美元"},
+    # A 股指数（腾讯行情为主源、东方财富为备源；指数无需复权；单位：点）
+    {"key": "SH",     "label": "上证综指",  "group": "A股", "source": "ashare",
+     "symbol": "sh000001", "em_secid": "1.000001", "unit": "点"},
+    {"key": "HS300",  "label": "沪深300",   "group": "A股", "source": "ashare",
+     "symbol": "sh000300", "em_secid": "1.000300", "unit": "点"},
+    {"key": "CYB",    "label": "创业板指",  "group": "A股", "source": "ashare",
+     "symbol": "sz399006", "em_secid": "0.399006", "unit": "点"},
+    {"key": "ZZ1000", "label": "中证1000",  "group": "A股", "source": "ashare",
+     "symbol": "sh000852", "em_secid": "1.000852", "unit": "点"},
 ]
 
-GROUP_ORDER = ["加密", "商品", "宏观"]
+GROUP_ORDER = ["加密", "商品", "宏观", "A股"]
+
+# A 股时区与收盘时刻：15:00（北京时间）之后当日 bar 才算完整
+CN_TZ = timezone(timedelta(hours=8))
+CN_CLOSE_HOUR = 15
 
 
 # ---------------- 取数 ----------------
-def http_get(url, referer=None, timeout=30, retries=3):
-    if PROXY:
+def http_get(url, referer=None, timeout=30, retries=3, direct=False):
+    """direct=True 时强制直连——国内行情源（腾讯/东财）不应绕道本地海外代理。"""
+    proxy = None if direct else PROXY
+    if proxy:
         opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": PROXY, "https": PROXY}))
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
     else:
         opener = urllib.request.build_opener()
     headers = {"User-Agent": UA, "Accept": "application/json"}
@@ -196,10 +211,74 @@ def fetch_hyperliquid_daily(symbol):
 
 
 def drop_unclosed(rows):
-    """剔除未收盘日线（date >= 今日 UTC）。"""
+    """剔除未收盘日线（date >= 今日 UTC）。适用于加密 / 美股 / 商品（按 UTC 日线）。"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out = [r for r in rows if r["date"] < today]
     return out
+
+
+def drop_unclosed_cn(rows):
+    """A 股：北京时间 15:00 收盘，15:00 之后当日 bar 已完整。
+
+    必须与 drop_unclosed 分开——定时任务在 21:30（北京）运行，此刻 UTC 仍是同一天，
+    用 UTC 判断会把当天已收盘的 A 股 K 线删掉，导致 MA/RSI 静默偏移一天。"""
+    now = datetime.now(CN_TZ)
+    today = now.strftime("%Y-%m-%d")
+    if now.hour >= CN_CLOSE_HOUR:
+        return [r for r in rows if r["date"] <= today]
+    return [r for r in rows if r["date"] < today]
+
+
+def fetch_tencent_daily(code, count=2000):
+    """腾讯行情日线（A 股指数，主源）。count 上限 2000 根（约 8 年），超出会返回空结构。"""
+    url = (f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+           f"?param={code},day,,,{count},qfq")
+    data = json.loads(http_get(url, direct=True))
+    node = (data.get("data") or {}).get(code) or {}
+    # 指数无复权，返回键为 day（个股前复权时为 qfqday）
+    bars = node.get("day") or node.get("qfqday") or []
+    out = []
+    for b in bars:
+        if len(b) >= 3:
+            out.append({"date": b[0], "close": float(b[2])})
+    return out
+
+
+def fetch_eastmoney_daily(secid, lmt=2000):
+    """东方财富日线（A 股指数，备源）。secid：1.xxxxxx 沪市 / 0.xxxxxx 深市。"""
+    url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?"
+           f"secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55"
+           f"&klt=101&fqt=1&lmt={lmt}&end=20500101")
+    data = json.loads(http_get(url, direct=True))
+    lines = ((data.get("data") or {}).get("klines")) or []
+    out = []
+    for line in lines:
+        p = line.split(",")
+        if len(p) >= 3:
+            out.append({"date": p[0], "close": float(p[2])})
+    return out
+
+
+def fetch_ashare_daily(a):
+    """A 股指数：腾讯主源 → 东财备源，任一拿到足量数据即返回。
+
+    两源同一交易日收盘价实测逐位一致，可互为校验。"""
+    errs = []
+    try:
+        rows = fetch_tencent_daily(a["symbol"])
+        if len(rows) >= 300:
+            return rows
+        errs.append(f"tencent 仅 {len(rows)} 根")
+    except Exception as e:  # noqa: BLE001
+        errs.append(f"tencent: {e}")
+    try:
+        rows = fetch_eastmoney_daily(a["em_secid"])
+        if len(rows) >= 300:
+            return rows
+        errs.append(f"eastmoney 仅 {len(rows)} 根")
+    except Exception as e:  # noqa: BLE001
+        errs.append(f"eastmoney: {e}")
+    raise RuntimeError("A股双源均失败 —— " + " | ".join(errs))
 
 
 # ---------------- 指标与状态机 ----------------
@@ -324,8 +403,8 @@ def resonance_gate(daily_state, weekly_state):
       na    —— 日线无方向或周线数据不足，不适用
 
     重要：此函数最初按「风险闸门」设计（周线反向就不做逆势单）。该假设已用 2021-2026
-    全 18 品种样本验证并证伪——冲突格的前瞻收益没有显著劣势（20 日 p=0.59/0.75），
-    闸门版策略仅跑赢 9/18 品种（等于掷硬币）。因此返回值现在只用于**状态描述**，
+    全 22 品种样本验证并证伪——冲突格的前瞻收益没有显著劣势（20 日 p=0.59/0.75），
+    闸门版策略仅跑赢 9/22 品种（等于掷硬币）。因此返回值现在只用于**状态描述**，
     不接入任何信号过滤。详见 backtest_multi_tf.py / backtest_multi_tf.html。
     """
     if daily_state in (None, "", "N/A") or weekly_state in (None, "", "N/A"):
@@ -417,7 +496,7 @@ def render_html(reports, run_at):
     震荡中收盘上穿 MA60 转上升、下穿转下降，或 RSI 连续 2 日重新站上 70/跌破 30（再触发）。
     叠加日线 RSI 背离（顶背离切下降、底背离切上升，最高优先级）、反向穿越纠错、背离失败检测。
   </p>
-  <p style="font-size:12px;color:#999;">本提醒为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）。</p>
+  <p style="font-size:12px;color:#999;">本提醒为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）/ 腾讯行情（A 股指数，东财备源）。</p>
 </body></html>"""
     return html
 
@@ -462,9 +541,12 @@ def main():
                 rows = fetch_binance_daily(a["symbol"], warm_dt)
             elif a["source"] == "hyperliquid":
                 rows = fetch_hyperliquid_daily(a["symbol"])
+            elif a["source"] == "ashare":
+                rows = fetch_ashare_daily(a)
             else:
                 rows = fetch_yahoo_daily(a["symbol"], warm_dt)
-            rows = drop_unclosed(rows)
+            # A 股按北京时间 15:00 判断当日是否已收盘，其余按 UTC 日线
+            rows = drop_unclosed_cn(rows) if a["source"] == "ashare" else drop_unclosed(rows)
             closes = [r["close"] for r in rows]
             dates = [r["date"] for r in rows]
             reg = compute_regime(closes, dates)

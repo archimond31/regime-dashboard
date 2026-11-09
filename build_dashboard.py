@@ -29,9 +29,11 @@ from visualize_btc_regime import (
 )
 from visualize_eth_gold_regime import fetch_yahoo_daily
 from daily_regime_alert import (
-    ASSETS, GROUP_ORDER, fetch_hyperliquid_daily, compute_regime, compute_regime_weekly,
+    ASSETS, GROUP_ORDER, fetch_hyperliquid_daily, fetch_ashare_daily,
+    compute_regime, compute_regime_weekly,
     resonance_gate, GATE_CN, trig_cn,
-    STATE_CN, STATE_COLOR, TRIGGER_CN, fmt_price, WARM_START, START, drop_unclosed,
+    STATE_CN, STATE_COLOR, TRIGGER_CN, fmt_price, WARM_START, START,
+    drop_unclosed, drop_unclosed_cn,
 )
 
 MIN_DAYS = 3
@@ -83,7 +85,14 @@ def fetch_asset(a, warm_dt):
         return fetch_binance_daily(a["symbol"], warm_dt)
     if a["source"] == "hyperliquid":
         return fetch_hyperliquid_daily(a["symbol"])
+    if a["source"] == "ashare":
+        return fetch_ashare_daily(a)
     return fetch_yahoo_daily(a["symbol"], warm_dt)
+
+
+def trim_unclosed(a, rows):
+    """按市场各自的收盘规则剔除未收盘 bar（A 股按北京时间 15:00，其余按 UTC 日线）。"""
+    return drop_unclosed_cn(rows) if a["source"] == "ashare" else drop_unclosed(rows)
 
 
 def render_summary(summary):
@@ -202,7 +211,7 @@ def main():
 
     for a in ASSETS:
         try:
-            rows = drop_unclosed(fetch_asset(a, warm_dt))
+            rows = trim_unclosed(a, fetch_asset(a, warm_dt))
             dates = [r["date"] for r in rows]
             closes = [r["close"] for r in rows]
             reg = compute_regime(closes, dates)
@@ -384,9 +393,10 @@ def main():
     <b>多周期（周线）状态</b>：周线跑<b>同一套</b>状态机，参数为日线的 ÷5 机械映射
     （MA120→MA24、MA60→MA12，自由度为 0，不为周线单独调参）；只取已走完的周，
     当前周未收盘前不参与判定。日线与周线方向相反时标「日周反向」，<b>仅作状态描述</b>——
-    把它当作「风险闸门」的假设已在 2021-2026 全 18 品种样本上验证并证伪：冲突格的前瞻收益
-    没有显著劣势（20 日 p=0.59/0.75），闸门版策略仅跑赢 9/18 品种（=掷硬币），故不参与信号过滤。<br>
-    本面板为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）。
+    把它当作「风险闸门」的假设已在 2021-2026 全 22 品种样本上验证并证伪：冲突格的前瞻收益
+    没有显著劣势（20 日 p=0.59/0.75），闸门版策略仅跑赢 9/22 品种（=掷硬币），故不参与信号过滤。<br>
+    本面板为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）/
+    腾讯行情（A 股指数，东方财富备源）。A 股按北京时间 15:00 判定当日是否已收盘，其余按 UTC 日线。
   </div>
 </div>
 <script>

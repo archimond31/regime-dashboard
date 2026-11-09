@@ -31,7 +31,7 @@ from math import erf, sqrt
 from visualize_btc_regime import daily_states, to_weekly
 from daily_regime_alert import (
     ASSETS, GROUP_ORDER, STATE_CN, WARM_START,
-    fetch_hyperliquid_daily, drop_unclosed,
+    fetch_hyperliquid_daily, fetch_ashare_daily, drop_unclosed, drop_unclosed_cn,
 )
 from visualize_eth_gold_regime import fetch_yahoo_daily
 
@@ -75,17 +75,19 @@ def dir_adj(vals, daily_state):
 def fetch_asset(a, warm_dt):
     if a["source"] == "hyperliquid":
         return fetch_hyperliquid_daily(a["symbol"])
+    if a["source"] == "ashare":
+        return fetch_ashare_daily(a)
     return fetch_yahoo_daily(a["symbol"], warm_dt)
 
 
 # ---------------- 状态序列（含周线对齐） ----------------
-def build_states(rows, start=BT_START):
+def build_states(rows, start=BT_START, is_cn=False):
     """返回 (dates, closes, 日线状态序列, 对齐到日线的周线状态序列, 日线起点)。
 
     周线对齐规则：第 i 天取「最后一根 date <= dates[i] 的周线」的状态。
     周线 bar 的 date 是该周最后一个交易日，所以该状态在该日收盘即已知，无未来函数。
     """
-    rows = drop_unclosed(rows)
+    rows = drop_unclosed_cn(rows) if is_cn else drop_unclosed(rows)
     dates = [r["date"] for r in rows]
     closes = [r["close"] for r in rows]
     n = len(closes)
@@ -276,7 +278,7 @@ def main():
     for a in ASSETS:
         rows = fetch_asset(a, warm_dt)
         rows_cache[a["key"]] = rows
-        built = build_states(rows)
+        built = build_states(rows, is_cn=(a["source"] == "ashare"))
         if built is None:
             print(f"[{a['key']:5}] 数据不足，跳过")
             continue
