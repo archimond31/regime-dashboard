@@ -55,7 +55,8 @@ def fetch_binance_daily(symbol, start_dt):
     end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     rows, cursor = [], start_ms
     while cursor < end_ms:
-        url = (f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d"
+        # data-api.binance.vision = 币安官方公开数据镜像，免地域封锁（api.binance.com 对美国 IP 返回 451）
+        url = (f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=1d"
                f"&startTime={cursor}&limit=1000")
         data = json.loads(http_get(url))
         if not data:
