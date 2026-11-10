@@ -382,7 +382,10 @@ def s4_surface(data):
     print("=" * 108)
     LBS = [10, 20, 40]
     AKS = [1.0, 1.5, 2.0, 2.5, 3.0]
-    print(f"  {'止损\\回看':<10}" + "".join(f"{'N='+str(l):>12}" for l in LBS))
+    # 表头标签里带反斜杠做「行列分隔」的视觉提示，必须提到 f-string 外面写：
+    # Python 3.11 及更早禁止 f-string 表达式部分出现反斜杠（PEP 701 到 3.12 才放开）
+    corner = "止损\\回看"
+    print(f"  {corner:<10}" + "".join(f"{'N=' + str(l):>12}" for l in LBS))
     print("  " + "-" * 46)
     grid = {}
     for ak in AKS:

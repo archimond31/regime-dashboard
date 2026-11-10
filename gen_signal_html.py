@@ -93,7 +93,10 @@ if holds:
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
             f'color:{"#6a1b9a" if p["left"] <= 10 else MU}">{p["left"]}</td>'
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:center">'
-            f'{"<b style=\"color:" + DN + "\">已翻转</b>" if p["flipped"] else "持有"}</td></tr>')
+            # 状态格单独拼：不能在 f-string 的表达式里写转义引号，
+            # Python 3.11 及更早会直接报 SyntaxError（PEP 701 到 3.12 才允许）
+            + (f'<b style="color:{DN}">已翻转</b>' if p["flipped"] else "持有")
+            + '</td></tr>')
     hold_block = (
         f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓（{len(holds)} 个）</h2>'
         f'<table style="width:100%;border-collapse:collapse;font-size:13px">'

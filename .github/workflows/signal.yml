@@ -36,6 +36,27 @@ jobs:
         with:
           python-version: '3.11'
 
+      # 语法预检：3.11 比本地 3.13 严格 —— f-string 表达式里的反斜杠在 3.12 才放开
+      # （PEP 701），本地能跑、云端报 SyntaxError。放在取数之前，让错误以「语法」的名义出现，
+      # 而不是埋在几分钟下载之后的 traceback 里。
+      - name: 语法预检（按 3.11 规则编译全部脚本）
+        run: |
+          python - <<'PY'
+          import glob, py_compile, sys
+          bad = []
+          for f in sorted(glob.glob("*.py")):
+              try:
+                  py_compile.compile(f, cfile=None, doraise=True)
+              except py_compile.PyCompileError as e:
+                  msg = str(e).strip().splitlines()[-1]
+                  bad.append((f, msg))
+          for f, m in bad:
+              print(f"::error file={f}::{m}")
+          if bad:
+              sys.exit(1)
+          print(f"语法预检通过（{len(glob.glob('*.py'))} 个文件）")
+          PY
+
       # 缓存按「UTC 日期」分桶：当天第一次跑存一份，后 5 次直接命中。
       # 不能按 run_id 做 key —— 那样每次都会存一份 77 MB，6 次/天很快撑爆缓存配额。
       - name: 生成缓存日期键
