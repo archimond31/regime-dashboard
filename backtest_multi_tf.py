@@ -452,8 +452,11 @@ def main():
         v20 = [r for _i, r in pooled[k][20]]
         adj = dir_adj(v20, k[0])
         is_conf = (k[0] == "UP" and k[1] == "DOWN") or (k[0] == "DOWN" and k[1] == "UP")
+        # 高亮样式先算好：不能在 f-string 的表达式里写转义双引号，
+        # Python 3.11 及更早会直接报 SyntaxError（PEP 701 到 3.12 才允许）
+        conf_style = ' style="background:#fdecec;"' if is_conf else ""
         grid_rows += (
-            f"<tr{' style=\"background:#fdecec;\"' if is_conf else ''}>"
+            f"<tr{conf_style}>"
             f"<td style='text-align:left;'>{GRID_CN[k]}</td><td>{len(v20)}</td>"
             f"<td>{pct(statistics.median(v5)) if v5 else '—'}</td>"
             f"<td>{pct(statistics.median(v20)) if v20 else '—'}</td>"
