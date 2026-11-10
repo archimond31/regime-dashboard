@@ -17,13 +17,47 @@ visualize_btc_regime.py —— BTC 2024 年以来行情区间可视化（含背�
 import os
 import time
 import json
+import socket
 import bisect
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
-# 代理开关：本地默认走 127.0.0.1:10809；GitHub Actions 等云端设 REGIME_PROXY=none 直连
-_PROXY = os.environ.get("REGIME_PROXY", "http://127.0.0.1:10809")
-PROXY = None if _PROXY.strip().lower() in ("", "none", "direct", "off") else _PROXY
+# 代理：默认「自动探测」，不再硬编码端口。
+# 起因是 2026-11 代理客户端把 HTTP 端口从 10809 换成了 7890，
+# 硬编码导致 git 和日报/看板取数全部静默失败 —— 端口本来是用户可改的配置，不该钉死在代码里。
+#   REGIME_PROXY=none / direct / off  → 强制直连（GitHub Actions 云端必须这样）
+#   REGIME_PROXY=http://ip:port       → 强制指定
+#   不设 或 =auto                      → 按候选端口探测，第一个通的就是它
+_PROXY_CANDIDATES = ("http://127.0.0.1:7890",    # Clash / mihomo 系默认
+                     "http://127.0.0.1:10809",   # v2rayN 系默认
+                     "http://127.0.0.1:7897",    # Clash Verge
+                     "http://127.0.0.1:10808",
+                     "http://127.0.0.1:1080")    # 通用 SOCKS/HTTP
+
+
+def detect_proxy(cands=_PROXY_CANDIDATES, timeout=0.4):
+    """按顺序探测本地代理端口，返回第一个能建立 TCP 连接的 URL；都不通返回 None。
+
+    只做 TCP 连通的握手，不发 HTTP 请求，所以即使探到的是 SOCKS 端口也不会误判成可用。
+    探测失败不抛异常 —— 交给调用方走直连（国内源可直连，海外源会给出明确报错）。
+    """
+    for url in cands:
+        try:
+            host, port = url.split("//", 1)[1].split(":")
+            with socket.create_connection((host, int(port)), timeout=timeout):
+                return url
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+_p = os.environ.get("REGIME_PROXY", "auto").strip()
+if _p.lower() in ("", "none", "direct", "off"):
+    PROXY = None
+elif _p.lower() == "auto":
+    PROXY = detect_proxy()
+else:
+    PROXY = _p
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 START = "2024-01-01"
