@@ -1,0 +1,7 @@
+{
+  "host": "smtp.qq.com",
+  "port": 465,
+  "user": "1084328481@qq.com",
+  "pass": "在这里填QQ邮箱SMTP授权码（不是登录密码）",
+  "to": ["1084328481@qq.com"]
+}

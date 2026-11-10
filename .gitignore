@@ -10,6 +10,24 @@
 !daily_regime_alert.py
 !build_dashboard.py
 !backtest_multi_tf.py
+!backtest_4h_long.py
+!fetch_binance_vision.py
+!backtest_4h_cross_asset.py
+!strategy_1h_rsi.py
+!backtest_1h_rsi.py
+
+# 1H 第二版假设检验（结论可复现，随仓库发布）
+!test_1h_v2.py
+!test_1h_v3.py
+!test_1h_v4.py
+!test_1h_v5.py
+!test_4h_sanity.py
+!test_1h_opt.py
+!test_1h_opt2.py
+!test_1h_overlay.py
+!test_1h_struct.py
+!test_1h_struct2.py
+!test_1h_cooldown.py
 
 # CI/CD 部署
 !.github/
@@ -26,3 +44,88 @@ regime_dashboard.html
 
 # 例外：多周期验证报告是结论快照，随仓库一起发布（不随 CI 重算）
 !backtest_multi_tf.html
+!backtest_4h.html
+!backtest_4h_cross_asset.html
+!backtest_1h_rsi.html
+!bt_contrarian.py
+!gen_contrarian_html.py
+!contrarian_2025.html
+!follow_2025.html
+!skeleton_build.html
+!gen_skeleton_html.py
+!bt_skeleton.py
+!test_stop_opt.py
+!test_walkforward.py
+!test_regime_fit.py
+
+# 商品期货移植检验（结论快照，随仓库发布）
+!fetch_futures.py
+!diag_futures.py
+!test_fut_skeleton.py
+!gen_fut_html.py
+!fut_skeleton.html
+!test_fut_macro.py
+!gen_fut_macro_html.py
+!fut_macro.html
+# _fut_daily.json（15 MB 原始数据）不入库，用 fetch_futures.py 重新拉取
+
+# 国际商品期货（COMEX/NYMEX）移植检验
+!fetch_intl.py
+!test_intl.py
+!gen_intl_html.py
+!intl_skeleton.html
+# _intl_daily.json（1.7 MB 新浪外盘日线）不入库，用 fetch_intl.py 重新拉取
+
+# 加密 20 品种扩展（原始 10 + 新增 10）
+!probe_new_coins.py
+!skeleton20_build.html
+# skeleton20.json（2 MB，含全部逐笔）不入库：SKEL_N=20 python bt_skeleton.py 重新生成
+
+# Binance 归档缓存（原始 zip，不入库）
+.cache_binance/
+
+# 品种准入闸门研究（能否事前筛出「这套策略适用」的币）
+!test_gate.py
+!test_gate2.py
+!gen_gate_html.py
+!gate_build.html
+# _gate_stage1.json / _gate_stage2.json（2.1 MB，含逐笔与全部 48 组净值）不入库：
+#   python test_gate.py && python test_gate2.py 重新生成
+
+# 单笔归因（1574 笔里谁在赚钱）+ 出场参数消融
+!test_trades.py
+!gen_trades_html.py
+!trades_build.html
+!bt_skeleton.py
+!fetch_binance_vision.py
+!trades_build.html
+!_dump_states.py
+# _trades_stats.json / _states.json / _abl_*.json / .cache_pct_*.json 全部不入库：
+#   bt_skeleton.py 用 SKEL_MAXBARS / SKEL_EARLY_N / SKEL_TRAIL_K 重跑即可复现，
+#   归因用 python test_trades.py（依赖 _dump_states.py 生成的 _states.json）
+
+# 实盘信号（只出信号、绝不下单）+ 邮件提醒
+#   python run_signal.py  → 拉数据算信号 → 渲染 signal_now.html → 有动作才发邮件
+!live_signals.py
+!gen_signal_html.py
+!notify_mail.py
+!run_signal.py
+!fetch_hyperliquid.py
+!_mail.json.example
+# 不入库：_signal.json / signal_now.html（每轮覆盖的快照，提交了会变成过期误导）、
+#         _mail.json（含授权码）、
+#         .cache_hl/（Hyperliquid 原始 K 线）、.cache_pct_*.json（分位缓存）、_sig.png（截图）
+.cache_hl/
+_mail.json
+mail_config.json
+_sig.png
+
+# 信号链路的依赖闭包（CI 需要，本地 13 个文件即可独立跑通，零第三方库）
+!test_regime_fit.py
+!_proto_4h.py
+!strategy_1h_rsi.py
+!test_1h_v2.py
+!test_1h_struct.py
+!.github/workflows/signal.yml
+# 不入库：.notify_state.json（去重台账，只对本机/当次 CI 有意义）
+.notify_state.json

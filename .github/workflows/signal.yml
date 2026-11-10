@@ -1,0 +1,77 @@
+name: Crypto Signal (4H)
+
+# 每根 4H 收盘后 5 分钟跑一次，只出信号、不下单。
+# 与 dashboard.yml 分开：看板每天一次就够，信号必须踩 4H 的收盘点。
+on:
+  schedule:
+    # UTC 00/04/08/12/16/20 收盘 → 05 分跑（北京时间为 08:05 / 12:05 / 16:05 / 20:05 / 00:05 / 04:05）
+    - cron: '5 0,4,8,12,16,20 * * *'
+  workflow_dispatch:
+    inputs:
+      always:
+        description: '本轮无动作也发信（用于连通性测试）'
+        type: boolean
+        default: false
+      force:
+        description: '忽略去重台账，强制重发同一根 4H'
+        type: boolean
+        default: false
+
+# 只读：本流程不回写仓库，避免 6 次/天的提交噪音
+permissions:
+  contents: read
+
+concurrency:
+  group: crypto-signal
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 缓存按「UTC 日期」分桶：当天第一次跑存一份，后 5 次直接命中。
+      # 不能按 run_id 做 key —— 那样每次都会存一份 77 MB，6 次/天很快撑爆缓存配额。
+      - name: 生成缓存日期键
+        id: k
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: 恢复 K 线缓存 + 去重台账
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache_binance
+            .cache_hl
+            .notify_state.json
+          key: sig-cache-${{ steps.k.outputs.day }}
+          restore-keys: |
+            sig-cache-
+
+      - name: 写入邮件配置
+        env:
+          SMTP_PASS: ${{ secrets.QQ_SMTP_AUTH_CODE }}
+        run: |
+          if [ -z "$SMTP_PASS" ]; then
+            echo "::error::缺少 secret QQ_SMTP_AUTH_CODE（Settings → Secrets and variables → Actions）"
+            exit 1
+          fi
+          python -c "import json,os; json.dump({'host':'smtp.qq.com','port':465,'user':'1084328481@qq.com','pass':os.environ['SMTP_PASS'],'to':['1084328481@qq.com']}, open('_mail.json','w'))"
+          echo "邮件配置已写入（内容不回显）"
+
+      - name: 生成信号并发信
+        run: |
+          # 用 if 而不是 `[ ... ] && ARGS=...`：
+          # 后者条件为假时整行返回非 0。bash -e 对 && 列表中非末位命令的失败有例外，
+          # 所以现在不会中断；但这份「不报错」是隐式豁免出来的，
+          # 一旦这行被挪到脚本末尾、或改成 || 组合，就会变成真故障。if 语义明确。
+          ARGS=""
+          if [ "${{ inputs.always }}" = "true" ]; then ARGS="$ARGS --always"; fi
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          echo "参数：${ARGS:-（默认：有动作才发）}"
+          python run_signal.py $ARGS
