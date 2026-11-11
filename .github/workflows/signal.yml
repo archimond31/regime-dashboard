@@ -1,23 +1,35 @@
 name: Crypto Signal (4H)
 
-# 每根 4H 收盘后 5 分钟跑一次，只出信号、不下单。
-# 与 dashboard.yml 分开：看板每天一次就够，信号必须踩 4H 的收盘点。
+# 触发方式：只由外部定时器通过 workflow_dispatch API 触发，不用 schedule。
+#
+# 为什么弃用 GitHub cron —— 这是实测数据，不是猜测：
+#   应触发 11-10 16:05 → 实际 19:39（+3h34m）
+#   应触发 11-11 00:05 → 实际 00:36（+31m）
+#   同期 dashboard 的 13:30 定时 → 实际 20:30（+7h）和 23:03（+9h33m）
+#   6 次/天只落到 2 次，漏跑是实打实的
+# 对 4H 突破策略，晚 3.5 小时意味着回测里的入场价已经不存在了。
+# GitHub 官方也明确 schedule 是 best-effort，高负载时会延迟甚至丢弃。
+#
+# 外部定时器（如 cron-job.org）按 UTC 01/04/08/12/16/20 各 :05 调用本工作流。
+# 其中 UTC 01:05（北京 09:05）那次自动转成「日报」，无动作也发，
+# 于是「今天没收到任何邮件」只可能表示链路故障 —— 沉默不再有歧义。
 on:
-  schedule:
-    # UTC 00/04/08/12/16/20 收盘 → 05 分跑（北京时间为 08:05 / 12:05 / 16:05 / 20:05 / 00:05 / 04:05）
-    - cron: '5 0,4,8,12,16,20 * * *'
   workflow_dispatch:
     inputs:
+      digest:
+        description: '强制按日报模式发（每天北京最多一封）。UTC 01 点那次会自动开启'
+        type: boolean
+        default: false
       always:
-        description: '本轮无动作也发信（用于连通性测试）'
+        description: '本轮无动作也发信（仍受同 bar 去重）'
         type: boolean
         default: false
       force:
-        description: '忽略去重台账，强制重发同一根 4H'
+        description: '忽略去重台账，强制重发'
         type: boolean
         default: false
 
-# 只读：本流程不回写仓库，避免 6 次/天的提交噪音
+# 只读：本流程不回写仓库
 permissions:
   contents: read
 
@@ -57,8 +69,8 @@ jobs:
           print(f"语法预检通过（{len(glob.glob('*.py'))} 个文件）")
           PY
 
-      # 缓存按「UTC 日期」分桶：当天第一次跑存一份，后 5 次直接命中。
-      # 不能按 run_id 做 key —— 那样每次都会存一份 77 MB，6 次/天很快撑爆缓存配额。
+      # 缓存按「UTC 日期」分桶：当天第一次跑存一份，后几次直接命中。
+      # 不能按 run_id 做 key —— 那样每次都会存一份 77 MB，很快撑爆缓存配额。
       - name: 生成缓存日期键
         id: k
         run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
@@ -87,12 +99,15 @@ jobs:
 
       - name: 生成信号并发信
         run: |
-          # 用 if 而不是 `[ ... ] && ARGS=...`：
-          # 后者条件为假时整行返回非 0。bash -e 对 && 列表中非末位命令的失败有例外，
-          # 所以现在不会中断；但这份「不报错」是隐式豁免出来的，
-          # 一旦这行被挪到脚本末尾、或改成 || 组合，就会变成真故障。if 语义明确。
+          # 用 if 而不是 `[ ... ] && ARGS=...`：后者条件为假时整行返回非 0，
+          # 依 bash -e 的例外规则虽然不会中断，但那是隐式豁免。if 语义明确。
           ARGS=""
+          HOUR=$(date -u +%H)
+          DIGEST="${{ inputs.digest }}"
+          # UTC 01 点（北京 09:05）那一次默认转日报，外部定时器不必额外传参
+          if [ "$DIGEST" = "true" ] || [ "$HOUR" = "01" ]; then ARGS="$ARGS --digest"; fi
           if [ "${{ inputs.always }}" = "true" ]; then ARGS="$ARGS --always"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          echo "UTC 小时：$HOUR"
           echo "参数：${ARGS:-（默认：有动作才发）}"
           python run_signal.py $ARGS

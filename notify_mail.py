@@ -15,10 +15,12 @@ QQ 邮箱授权码：设置 → 账户 → POP3/SMTP服务 → 开启 → 生成
 
 用法：
     python notify_mail.py                 # 有动作才发，同一根 4H 只发一次
-    python notify_mail.py --always        # 无论有没有动作都发
-    python notify_mail.py --dry           # 只打印主题与去重指纹，不真发
-    python notify_mail.py --force         # 忽略去重台账，强制重发同一信号
+    python notify_mail.py --always        # 无论有没有动作都发（仍受同 bar 去重）
+    python notify_mail.py --digest        # 日报：每天（北京）最多一封，无动作也发
+    python notify_mail.py --dry           # 只打印主题与判定，不真发
+    python notify_mail.py --force         # 忽略去重台账，强制重发
 """
+import datetime as dt
 import json
 import os
 import smtplib
@@ -68,7 +70,12 @@ def load_cfg():
     return None
 
 
-STATE = ".notify_state.json"   # 去重台账：记录上次发的是哪根 4H 的哪个信号
+STATE = ".notify_state.json"   # 台账：上次发的是哪根 4H 的信号 + 上次发日报的北京日期
+BJ = dt.timezone(dt.timedelta(hours=8))
+
+
+def _today_bj():
+    return dt.datetime.now(dt.timezone.utc).astimezone(BJ).strftime("%Y-%m-%d")
 
 
 def _sig_key(sig):
@@ -89,23 +96,48 @@ def _read_state():
         return {}
 
 
+def _write_state(st):
+    json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
+
+
 def main():
     always = "--always" in sys.argv
     dry = "--dry" in sys.argv
     force = "--force" in sys.argv
+    digest = "--digest" in sys.argv
     sig = json.load(open(SIG, encoding="utf-8"))
     n_urgent = len(sig["urgent"])
     holds = [o["c"] for o in sig["coins"] if o["pos"]]
-    subj = (f"【加密信号】{sig['asof_bj'][5:16]} 需动作 {n_urgent} | "
-            f"持仓 {len(holds)}/{len(sig['coins'])}"
-            + (f"（{' '.join(sig['urgent'])}）" if n_urgent else ""))
+    bj_hm = sig["asof_bj"][5:16]
 
-    if n_urgent == 0 and not always:
-        print(f"[跳过] 本轮无动作。主题本应是：{subj}\n       要强制发就加 --always")
-        return
+    if digest:
+        # 日报：每天（北京）最多一封，无动作也发。
+        # 存在的意义不是传递信号，是让「今天没收到任何邮件」只可能表示故障。
+        subj = (f"【加密日报】{bj_hm} 持仓 {len(holds)}/{len(sig['coins'])}"
+                + (f" · 待处理 {n_urgent}（{' '.join(sig['urgent'])}）"
+                   if n_urgent else " · 今日无新动作"))
+    else:
+        subj = (f"【加密信号】{bj_hm} 需动作 {n_urgent} | "
+                f"持仓 {len(holds)}/{len(sig['coins'])}"
+                + (f"（{' '.join(sig['urgent'])}）" if n_urgent else ""))
 
+    st = _read_state()
     key = _sig_key(sig)
-    dup = _read_state().get("sig") == key
+    dup = st.get("sig") == key
+    sent_digest_today = st.get("last_sent_bj") == _today_bj()
+
+    if digest:
+        if sent_digest_today and not force:
+            print(f"[跳过] 今天（北京 {_today_bj()}）的日报已经发过了，不重复发。要重发加 --force")
+            return
+    else:
+        if n_urgent == 0 and not always:
+            print(f"[跳过] 本轮无动作。主题本应是：{subj}\n       要强制发就加 --always")
+            return
+        if dup and not force:
+            print(f"[跳过] 这根 4H（{sig.get('bar4h')}）的信号已经发过了，不重复发。"
+                  f"要重发加 --force")
+            return
 
     cfg = load_cfg()
     if not cfg:
@@ -116,20 +148,18 @@ def main():
         return
     if dry:
         # 演练不走去重分支：要看的是「这一轮到底会不会发」，而不是被上次的记录挡住
-        if force:
+        if digest:
+            verdict = "日报模式，今天未发过 → 实跑会发送"
+        elif force:
             verdict = "已加 --force → 实跑会发送（绕过去重）"
         elif dup:
             verdict = "与上次相同 → 实跑会被跳过（要发加 --force）"
         else:
             verdict = "与上次不同 → 实跑会发送"
         print(f"[dry] 配置来自 {cfg['_src']}，收件人 {', '.join(cfg['to'])}")
-        print(f"[dry] 去重指纹 {key} —— {verdict}")
+        print(f"[dry] 去重指纹 {key}")
+        print(f"[dry] {verdict}")
         print(f"[dry] {subj}")
-        return
-
-    if dup and not force:
-        print(f"[跳过] 这根 4H（{sig.get('bar4h')}）的信号已经发过了，不重复发。"
-              f"要重发加 --force")
         return
 
     body = open(HTML, encoding="utf-8").read()
@@ -144,8 +174,10 @@ def main():
         s.login(cfg["user"], cfg["pass"])
         s.sendmail(cfg["user"], cfg["to"], msg.as_string())
     # 只有真发成功才记账，发失败不写，下次还会重试
-    json.dump({"sig": key, "ts": sig.get("asof"), "bar4h": sig.get("bar4h")},
-              open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
+    st.update({"sig": key, "ts": sig.get("asof"), "bar4h": sig.get("bar4h")})
+    if digest:
+        st["last_sent_bj"] = _today_bj()
+    _write_state(st)
     print(f"[已发送] {subj} → {', '.join(cfg['to'])}")
 
 

@@ -9,6 +9,7 @@
 用法：
     python run_signal.py                 # 有动作才发邮件（默认）
     python run_signal.py --always        # 不管有没有动作都发
+    python run_signal.py --digest        # 发每日日报（每天北京最多一封，无动作也发）
     python run_signal.py --dry           # 全链路跑，但不真发信
     python run_signal.py --force         # 忽略去重，强制重发同一根 4H 的信号
     python run_signal.py --no-mail       # 只出 signal_now.html，不碰邮件
@@ -37,7 +38,7 @@ def step(name, args, fatal=True):
 def main():
     argv = sys.argv[1:]
     no_mail = "--no-mail" in argv
-    passthru = [a for a in argv if a in ("--always", "--dry", "--force")]
+    passthru = [a for a in argv if a in ("--always", "--dry", "--force", "--digest")]
 
     if not step("① 拉数据 + 算信号", ["live_signals.py"]):
         return 1
