@@ -160,12 +160,43 @@ def s2_vol_target(data):
 
 
 # ---------------------------------------------------------------- S3
+H4_MS = 4 * 3600 * 1000
+
+
 def agg4h(bars):
+    """1H → 4H。按 **时间戳分桶**，不是按索引每 4 根切。
+
+    曾经写的是 `for i in range(0, len(bars) - 3, 4)`，看着没问题，实际有两个坑：
+
+    ① 1H 序列的首根不一定落在 4H 网格上。实测 UNI/AAVE 首根是 03:00、
+       SOL 06:00、BNB 03:00、LINK 10:00 —— 一上来就错位。
+    ② 数据源有缺口。BTC 九年里 29 处缺口共少 155 个小时，索引一滑，
+       后面所有分组跟着平移，误差还会累积。
+
+    两个坑叠起来的后果不是「少几根」，而是**每一根 4H 都错开 1 小时**：
+    本该 20:00–23:59 的一根变成了 19:00–22:59，收盘价、极值全是别人的。
+    回测里看不出来（收益率对 1 小时平移不敏感），但一旦要把「入场时间」
+    写到实盘表格上，就露馅了 —— 表上写 07:00，市场那根 4H 是 08:00 收的。
+
+    改成按 `ts // 4h` 分桶后：桶边界天然对齐 UTC 的 00/04/08/12/16/20，
+    缺一根的桶直接跳过（不硬凑成「4 根但横跨 5 小时」的假 4H）。
+    """
+    buckets, cur = [], None
+    for i, b in enumerate(bars):
+        k = b["t"] // H4_MS
+        if cur is None or cur[0] != k:
+            cur = (k, [])
+            buckets.append(cur)
+        cur[1].append(i)
+
     out = []
-    for i in range(0, len(bars) - 3, 4):
-        seg = bars[i:i + 4]
+    for k, idx in buckets:
+        if len(idx) != 4:
+            continue                      # 缺口桶 / 还没走完的当前桶
+        seg = [bars[i] for i in idx]
         out.append({
-            "date": seg[-1]["date"], "src": i + 3,
+            "date": seg[-1]["date"], "src": idx[-1],
+            "ts": (k + 1) * H4_MS,        # 收盘时刻 = 桶起点 + 4h
             "open": seg[0]["open"],
             "high": max(x["high"] for x in seg),
             "low": min(x["low"] for x in seg),

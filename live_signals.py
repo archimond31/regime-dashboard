@@ -49,6 +49,16 @@ def _fmt_ts(ms):
     return dt.datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
+def _fmt_bj(ms):
+    """毫秒时间戳 → 北京时间「月-日 时:分」。
+
+    表里统一用北京时间：用户在国内看盘，看到 11-11 08:00 能直接对上自己那根 4H，
+    比让他自己 +8 换算靠谱。
+    """
+    t = dt.datetime.fromtimestamp(ms / 1000, tz=timezone.utc) + dt.timedelta(hours=8)
+    return t.strftime("%m-%d %H:%M")
+
+
 def load_coin(c, now):
     """返回已收盘的 (b4, daily)，且两者都带统一的 ts（收盘毫秒时间戳）。
 
@@ -68,10 +78,8 @@ def load_coin(c, now):
             x["ts"] = x["t"] + 86400 * 1000
     else:
         b = load_bars(c, "1h")
-        b4 = agg4h(b)
+        b4 = agg4h(b)          # agg4h 自带 ts（桶起点 +4h，严格落在 00/04/08/…/20）
         d1 = to_daily(b)
-        for x in b4:
-            x["ts"] = b[x["src"]]["t"] + 3600 * 1000
         for x in d1:
             x["date"] = x["date"][:10]
     b4 = [x for x in b4 if x["ts"] <= now_ms]
@@ -113,9 +121,17 @@ def analyze(c, now):
         if t["j"] == n - 1 and t["reason"] == "timeout" and (t["j"] - t["i"]) < MAX_BARS:
             held = t["j"] - t["i"]
             upnl_r = t["side"] * (px - t["entry"]) / t["risk"]
+            # 入场时刻必须从 4H 的收盘时间戳算，不能直接用 t["d"]：
+            # t["d"] 是「该 4H 段里最后一根 1H 的日期」，而 00:00 UTC 收盘的那根 4H
+            # 装的是前一天 20:00~23:00 —— 于是 11-11 00:00 入场的仓会被记成 11-10，差一天。
+            ets = b4[t["i"]]["ts"]
             o["pos"] = dict(
                 side=t["side"], entry=t["entry"], stop=t["stop"],
-                stop_pct=t["stop_pct"] * 100, entry_date=t["d"], regime=t["regime"],
+                stop_pct=t["stop_pct"] * 100, regime=t["regime"],
+                entry_ts=ets,
+                entry_bj=_fmt_bj(ets),          # 11-11 08:00（北京时间，便于直接对照）
+                entry_utc=_fmt_ts(ets)[5:],     # 11-11 00:00（4H 收盘时刻，UTC）
+                entry_date=_fmt_ts(ets)[:10],   # 修正后的日期（原为 t["d"]，会差一天）
                 held=held, left=MAX_BARS - held, upnl_r=upnl_r,
                 upnl_px=(px / t["entry"] - 1) * 100 * (1 if t["side"] > 0 else -1),
                 dist_stop=abs(px - t["stop"]) / px * 100,

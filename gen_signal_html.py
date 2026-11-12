@@ -83,6 +83,7 @@ if holds:
             f'<tr><td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px"><b>{o["c"]}</b></td>'
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;color:{rc}">{rt}</td>'
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right">{px(p["entry"])}</td>'
+            f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{MU};white-space:nowrap">{p.get("entry_bj") or "—"}</td>'
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right">{px(o["px"])}</td>'
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
             f'color:{UP if u > 0 else DN};font-weight:600">{u:+.2f}R</td>'
@@ -102,9 +103,10 @@ if holds:
         f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
         f'<tr style="background:#f5f5f5">'
         + "".join(f'<th style="padding:7px 9px;text-align:right;font-size:12px;color:{MU};font-weight:500">{h}</th>'
-                  for h in ["品种", "方向", "入场", "现价", "浮盈", "止损", "距止损", "已持(4H)", "剩兜底", "状态"])
+                  for h in ["品种", "方向", "入场价", "入场时间", "现价", "浮盈", "止损", "距止损", "已持(4H)", "剩兜底", "状态"])
         + f'</tr>{hrows}</table>'
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
+        f'「入场时间」为北京时间（UTC+8），即那根 4H 的收盘时刻——不是下单时刻。'
         f'「剩余兜底」= 距满 {120} 根 4H 强制平仓还剩多少根。到 0 就按收盘价平。</div>')
 else:
     hold_block = (f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓</h2>'
@@ -177,6 +179,16 @@ if errs:
                  f'<b>取数失败：</b>{"; ".join(e["c"] + " " + e["err"] for e in errs)}'
                  f'<br>这些品种本轮没有信号，不代表它没有信号。</div>')
 
+# 各币最新已收盘 4H 不一定同步：Binance 走按日归档，当天文件要到次日才发布，
+# 于是它比 Hyperliquid 的实时接口慢一根。顶部若只写「最新」，用户拿它减去
+# 「已持 N 根 × 4h」会算不回表里的入场时间 —— 所以差一根就明写出来。
+_bars = sorted({o["bar"] for o in COINS if o.get("bar")})
+_lag = ""
+if len(_bars) > 1:
+    _n_lag = sum(1 for o in COINS if o.get("bar") == _bars[0])
+    _lag = (f'；其中 {_n_lag} 个品种停在 <b>{_bars[0]}</b>，'
+            f'因 Binance 按日归档要到次日才发布，比实时接口慢一根')
+
 html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>加密骨架信号 {d['asof_bj']}</title></head>
@@ -187,7 +199,7 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 <div style="font-size:12px;color:{MU};letter-spacing:.5px">日线 G 状态机 + 4H 突破 · 只出信号，不下单</div>
 <h1 style="font-size:20px;margin:6px 0 4px;font-weight:600">加密骨架信号 · {d['asof_bj']}（北京）</h1>
 <div style="font-size:12.5px;color:{MU};line-height:1.8;margin-bottom:16px">
-数据截止：4H 收盘 <b>{d['bar4h']} UTC</b>（未收盘的 K 线已剔除）　生成于 {d['asof']}<br>
+数据截止：4H 收盘 <b>{d['bar4h']} UTC</b>（未收盘的 K 线已剔除{_lag}）　生成于 {d['asof']}<br>
 品种：BTC / ETH / SOL / BNB / XRP / <b>HYPE</b> / LINK / CRV / UNI / AAVE（HYPE 替换 ADA）
 </div>
 
