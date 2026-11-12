@@ -132,7 +132,12 @@ def main():
             return
     else:
         if n_urgent == 0 and not always:
-            print(f"[跳过] 本轮无动作。主题本应是：{subj}\n       要强制发就加 --always")
+            # 即便不发信，也记下「这根本 4H 已经算过了」：
+            # run_signal 靠这个字段做 2 秒快速跳过，避免同一根被反复完整重算。
+            if not dry:
+                st.update({"sig": key, "ts": sig.get("asof"), "bar4h": sig.get("bar4h")})
+                _write_state(st)
+            print(f"[跳过] 本轮无动作（已记录这根本 4H）。主题本应是：{subj}")
             return
         if dup and not force:
             print(f"[跳过] 这根 4H（{sig.get('bar4h')}）的信号已经发过了，不重复发。"
