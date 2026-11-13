@@ -129,3 +129,11 @@ _sig.png
 !.github/workflows/signal.yml
 # 不入库：.notify_state.json（去重台账，只对本机/当次 CI 有意义）
 .notify_state.json
+
+# 本机部署（Windows 任务计划）：脚本入库，换机器/重装能照着重建
+!deploy/install_task.ps1
+!deploy/run_signal.cmd
+!deploy/DEPLOY-LOCAL.md
+!deploy/DEPLOY.md
+# 不入库：logs/（运行日志，纯本地痕迹）
+logs/

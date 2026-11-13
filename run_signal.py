@@ -75,6 +75,12 @@ def main():
     no_mail = "--no-mail" in argv
     passthru = [a for a in argv if a in ("--always", "--dry", "--force", "--digest")]
 
+    # 时间戳由 Python 打，不让 cmd 打 —— Windows 的 %DATE% 带本地化星期（「周五」），
+    # 是 GBK 字节，落进 UTF-8 日志就成乱码。统一在 UTF-8 这一侧输出才干净。
+    bj = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=8)
+    print(f"\n===== {bj:%Y-%m-%d %H:%M:%S} 北京 开始"
+          f"（参数：{' '.join(argv) if argv else '无'}）=====", flush=True)
+
     # 快速跳过：这根本 4H 已经完整算过一遍、**且今天已经真的发出过一封**时，
     # 没必要再拉一遍全量 K 线。正常一轮约 40 秒，跳过只要 0.3 秒。
     # 「今天还没有信」必须往下走 —— 否则当天第一封（保底日报）永远补不出来：
