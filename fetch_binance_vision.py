@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Binance 公共归档数据下载器（data.binance.vision，静态 CDN，不走 API）。
+"""Binance 行情数据：主路径是静态归档（data.binance.vision），尾段用 REST 补齐。
 
-为什么走 CDN 而不是 api.binance.com：
-  本地/国内网络对 api.binance.com、OKX、Bybit 的公共 API 全部 502（代理拦隧道），
-  但 data.binance.vision 是纯静态文件服务，可直连。它按月/按日发布官方 K 线归档，
-  正好符合「把 4H 样本拉回 2019 年」的需求——Hyperliquid 只给 5000 根（≈2.3 年）。
+两条腿为什么都要：
+  ① **历史**只能走归档。data.binance.vision 是纯静态文件服务，国内可直连，
+     按月/按日发布官方 K 线归档，正好符合「把 4H 样本拉回 2019 年」的需求
+     —— Hyperliquid 只给 5000 根（≈2.3 年）。
+     （api.binance.com / OKX / Bybit 的公共 API 在国内是 502，代理拦隧道）
+  ② **最近几根**必须走 REST。归档按日发布，当日那个 zip 要到**次日约 09:44
+     （北京）**才出现，所以一天里归档末端几乎不动。只靠归档的话，一个 4H 策略
+     每根 4H 都醒、却每次都拿到同一根 K 线，实际退化成「每天看一次」，
+     开仓/止损时点最多晚 24 小时。
+     data-api.binance.vision 与静态归档**同源、同一交易所、同一口径**，
+     且国内可直连（实测 9 个品种各 0.8s 内到手），只补「归档末端 → 现在」这一小段。
 
 文件格式：CSV，12 列
   open_time, open, high, low, close, volume, close_time, quote_volume,
@@ -16,8 +23,10 @@
   from fetch_binance_vision import load_4h
   bars = load_4h("BTC")          # 有缓存则直接读
   bars = load_4h("BTC", force=True)
+  bars = load_4h("BTC", tail=False)   # 只要归档，不补 REST 尾段（复现旧结果用）
 """
 import io
+import json
 import os
 import time
 import urllib.request
@@ -28,7 +37,10 @@ from datetime import datetime, timedelta, timezone
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 BASE = "https://data.binance.vision/data/spot"
+REST = "https://data-api.binance.vision/api/v3/klines"
 CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache_binance")
+
+INTERVAL_MS = {"1h": 3600 * 1000, "4h": 4 * 3600 * 1000, "1d": 86400 * 1000}
 
 # 面板加密组 → Binance 现货对（HYPE 只在 Hyperliquid，无 Binance 现货，单独排除）
 SYMBOLS = {
@@ -154,19 +166,53 @@ def _fetch_one(sym, kind, tag, t_from, t_to, interval="4h"):
     return _parse_csv(raw, t_from, t_to)
 
 
-def load_bars(name, interval="4h", force=False, end=None):
+def _fetch_rest(sym, interval, start_ms, now_ms, timeout=15):
+    """补 start_ms 之后、到「最后一根已收盘」为止的 K 线，返回 [(ts,o,h,l,c)]。
+
+    只收**已收盘**的 bar（open_time + 周期 <= 现在）。未收盘那根的 close 还在
+    跳，拿它判信号就是未来函数 —— 这是这条腿最容易埋进去的错。
+
+    任何异常都吞掉并返回已拿到的部分：REST 挂了就退回纯归档，宁可数据旧，
+    不能让整轮信号跑不出来。
+    """
+    step = INTERVAL_MS[interval]
+    out = []
+    cur = start_ms
+    for _ in range(12):                    # 12 × 1000 根 = 够补 41 天 1h
+        url = (f"{REST}?symbol={sym}&interval={interval}"
+               f"&startTime={cur}&limit=1000")
+        try:
+            data = json.loads(_get(url, timeout=timeout))
+        except Exception:                   # noqa: BLE001
+            break
+        if not data:
+            break
+        for k in data:
+            ts = int(k[0])
+            if ts + step > now_ms:
+                continue                    # 还没收盘
+            out.append((ts, float(k[1]), float(k[2]), float(k[3]), float(k[4])))
+        if len(data) < 1000:
+            break
+        cur = int(data[-1][0]) + step
+    return out
+
+
+def load_bars(name, interval="4h", force=False, end=None, tail=True):
     """返回 [{t, date, open, high, low, close}]，UTC 指定周期收盘序列。
 
     name 用短代码（BTC/ETH/...）。Binance 无现货的品种抛 KeyError。
     interval: "1h" / "4h" / "1d"
+    tail: 是否用 REST 补「归档末端 → 现在」（默认补；复现旧回测结果时置 False）
     """
     sym = SYMBOLS[name]
     os.makedirs(CACHE, exist_ok=True)
-    ck = (name, interval)
+    ck = (name, interval, tail, end)   # tail/end 必须进 key，否则同一进程里先补过的会被复用
     if not force and ck in _CACHE_TAIL:
         return _CACHE_TAIL[ck]
 
     now = datetime.now(timezone.utc)
+    auto_end = end is None          # 必须在给 end 填默认值之前记下来，下面判补尾要用
     if end is None:
         end = (now.year, now.month)
     start = LISTED_FROM.get(sym, (2020, 1))
@@ -207,13 +253,33 @@ def load_bars(name, interval="4h", force=False, end=None):
         bars.append({"t": ts,
                      "date": datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
                      "open": o, "high": h, "low": l, "close": c})
+
+    # 3) 归档末端 → 现在：补上还没进归档的那几根（理由见模块 docstring 的 ②）
+    #    end 有值说明调用方在切历史窗口（回测/复现），这时不该掺实时数据。
+    if tail and auto_end and bars:
+        step = INTERVAL_MS.get(interval)
+        now_ms = now.timestamp() * 1000
+        if step and bars[-1]["t"] + step <= now_ms:
+            add = _fetch_rest(sym, interval, bars[-1]["t"] + step, now_ms)
+            if add:
+                have = {b["t"] for b in bars}
+                for ts, o, h, l, c in add:
+                    if ts in have:          # startTime 是闭区间，首根可能重叠
+                        continue
+                    have.add(ts)
+                    bars.append({"t": ts,
+                                 "date": datetime.fromtimestamp(
+                                     ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                                 "open": o, "high": h, "low": l, "close": c})
+                bars.sort(key=lambda b: b["t"])
+
     _CACHE_TAIL[ck] = bars
     return bars
 
 
-def load_4h(name, force=False, end=None):
+def load_4h(name, force=False, end=None, tail=True):
     """4H 兼容包装（历史脚本都在用这个名字）。"""
-    return load_bars(name, "4h", force=force, end=end)
+    return load_bars(name, "4h", force=force, end=end, tail=tail)
 
 
 def to_daily(bars4h):
