@@ -132,6 +132,7 @@ _sig.png
 .notify_state.json
 
 # 本机部署（Windows 任务计划）：脚本入库，换机器/重装能照着重建
+!monitor.py
 !deploy/install_task.ps1
 !deploy/run_signal.cmd
 !deploy/DEPLOY-LOCAL.md
