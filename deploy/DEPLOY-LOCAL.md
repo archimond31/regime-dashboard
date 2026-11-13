@@ -40,7 +40,7 @@ GitHub Actions 的两件事治不了：
 | 触发时刻（北京） | `08:05` `12:05` `16:05` `20:05` `00:05` `04:05` —— 即每根 4H 收盘后 5 分钟 |
 | 运行身份 | 当前用户 `archimond`，不需要密码、不需要管理员 |
 | Python | `C:\Users\archimond\AppData\Local\Programs\Python\Python313\python.exe`（3.13.6） |
-| 日志 | `research/regime_rsi_ema_strategy/logs/signal.log`（UTF-8） |
+| 日志 | `regime_rsi_ema_strategy/logs/signal.log`（UTF-8） |
 | 错过补跑 | `StartWhenAvailable`，开机后补跑一次 |
 | 睡眠唤醒 | `WakeToRun` |
 | 电池 | 允许在电池上运行、不用电池也不中止 |
@@ -101,17 +101,39 @@ powershell -ExecutionPolicy Bypass -File deploy\install_task.ps1
 
 ## 3.1 在 PyCharm 里手动跑
 
-### 打开哪个目录
+> 2026-11-13 项目已迁到 `PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy`
+> （为了和 A 股项目放在一起管理）。迁移后计划任务已重新注册指向新路径。
 
-**打开这个目录，不要打开上层仓库根：**
+### 打开方式有两条，差别只在 Working directory
+
+**方式 A（推荐）：直接打开子目录**
 
 ```
-C:\Users\archimond\WorkBuddy\2026-11-04-16-19-12\research\regime_rsi_ema_strategy
+C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy
 ```
 
-`File → Open` 选它。原因是 `run_signal.py` 依赖的 13 个模块（`live_signals.py`、`test_regime_fit.py`、
-`strategy_1h_rsi.py`…）全都平铺在这一层，打开它才能在左侧面板一屏看全；打开上层仓库根会多出
-上百个无关文件。
+`File → Open` 选它。此时 Working directory 默认就是对的，不用动。
+
+**方式 B：打开 boros 根**，让侧边栏同时看到 A 股项目和它
+
+```
+C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage
+```
+
+**这种方式必须手动改一处**，否则一定出错：
+
+```
+Run → Edit Configurations → Working directory
+改为： C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy
+```
+
+默认值是 boros 根，不改的话脚本会以 boros 根为工作目录，于是：
+- `_signal.json` / `signal_now.html` 写进 boros 根（和别的文件混在一起）
+- `.cache_binance` 找不到 → 每次从零下载 77MB
+- `.notify_state.json` 找不到 → 去重失效，可能重复发信
+
+方式 B 的另一个代价：boros 里有 `data/ahist`（6000+ 只股票的 parquet），PyCharm 会连它一起索引，
+首次打开可能要等几分钟。
 
 ### 找到并运行
 
@@ -119,19 +141,24 @@ C:\Users\archimond\WorkBuddy\2026-11-04-16-19-12\research\regime_rsi_ema_strateg
 2. 右键 → **Run 'run_signal'**（或点行号区的绿色三角）
 3. 停止：红色方块，`Ctrl+F2`
 
-### 一定要检查的一处：Working directory
-
-`Run → Edit Configurations → Working directory` 必须是：
-
-```
-C:\Users\archimond\WorkBuddy\2026-11-04-16-19-12\research\regime_rsi_ema_strategy
-```
-
-这是默认值，**别改**。脚本用相对路径读写 `_signal.json`、`signal_now.html`、`.cache_binance`、
-`.notify_state.json`，工作目录一错就会「跑到别的地方去了」——表现是每次都从零下载 K 线、
-或者邮件里持仓莫名其妙。
-
 Interpreter 随便选 3.8 以上的都行，这套代码**零第三方库**，不需要 venv。
+
+### 嵌套 git 仓库的注意点
+
+`regime_rsi_ema_strategy` 自带 `.git`（指向 `archimond31/regime-dashboard`），放进 `boros_funding_arbitrage`
+（另一个 git 仓库）内部后，两者是**独立的嵌套仓库**：
+
+- 在 regime 目录里 `git` 命令操作的是 regime-dashboard
+- 在 boros 根里 `git status` 会把它显示成一个未跟踪目录
+- **不要在 boros 根执行 `git add -A`** —— git 会把它记成 gitlink（submodule 指针），
+  以后 clone 会指向一个不存在的 commit
+
+建议在 boros 根的 `.gitignore` 里加一行：
+
+```
+regime_rsi_ema_strategy/
+```
+
 
 ### 常用参数（Script parameters 里填）
 
