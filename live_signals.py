@@ -115,6 +115,13 @@ def analyze(c, now):
          "hi20": hi, "lo20": lo,
          "dist_up": (hi / px - 1) * 100, "dist_dn": (lo / px - 1) * 100}
 
+    # 当前这段状态是从哪天开始的（往回找连续同状态的第一根）。
+    # 用途：底仓清仓提示去重 —— 同一轮 DOWN 只提示一次，翻转后再翻空才重新提示。
+    k_seg = len(rg4) - 1
+    while k_seg > 0 and rg4[k_seg - 1] == state:
+        k_seg -= 1
+    o["regime_start"] = b4[min(k_seg, len(b4) - 1)]["date"]
+
     # ---- 当前是否持仓：最后一笔的出场点是否就是序列末尾（且没到 120 根）----
     holding = None
     if trades:
@@ -206,21 +213,81 @@ def analyze(c, now):
     return o
 
 
+BASE_CLEAR = "_base_clear.json"
+
+
+def _load_bc():
+    """底仓清仓台账：{币: 该轮 DOWN 的起始日期}。
+
+    同一轮 DOWN 只提示一次；日线翻回去、之后再翻空，才重新提示。
+    """
+    try:
+        with open(BASE_CLEAR, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_bc(d):
+    try:
+        with open(BASE_CLEAR, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
+    except Exception:
+        pass
+
+
 def main():
     now = _now_utc()
     rows, errs = [], []
     for c in COINS:
         try:
             rows.append(analyze(c, now))
-            r = rows[-1]
-            amt = r["target"]
-            astr = f"空 {abs(amt):,.0f}" if amt < 0 else f"{amt:,.0f}"
-            print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}{astr:>10} U  {r['note']}")
         except Exception as e:
             errs.append({"c": c, "err": f"{type(e).__name__}: {e}"})
             print(f"  {c:<5} 失败 {errs[-1]['err']}")
 
-    urgent = [o for o in rows if o["action"] in ("开仓", "平仓", "止损临近", "即将到期")]
+    # ---- 底仓动作提示（建 / 清）----
+    # 底仓的进出此前只体现为 target 数字从正变零或反过来 ——
+    # 不点开 JSON 根本看不见。下跌初期最容易「看着信号觉得没事、底仓还挂着」，
+    # 上涨初期同理「该建底仓却一直空着」。这里补成显式指令。
+    # 去重：按「动作 + 该轮状态的起始日」记台账，同一轮只提示一次。
+    bc = _load_bc()
+    for o in rows:
+        if o["pos"] is not None:
+            continue                      # 已有 4H 持仓，底仓动作不单独提示
+        rs = o.get("regime_start") or ""
+        if not rs:
+            continue
+        st = o["state"]
+        amt = round(PC.CAPITAL * PC.WEIGHTS.get(o["c"], 0.0) * PC.BASE_RATIO)
+        if st == "DOWN":
+            act = "清底仓"
+            tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")
+                    else "；做空要等 4H 收盘跌破前 20 根低点")
+            note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
+        elif st in ("UP", "RANGE") and not o.get("triggered"):
+            act = "建底仓"
+            note = f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场（4H 突破后再加到峰值）"
+        else:
+            continue                      # 已触发 = action 已是「开仓」，不重复
+        key = act + ":" + rs
+        if bc.get(o["c"]) == key:
+            continue                      # 这一轮已经提示过
+        o["action"] = act
+        o["clear_amount"] = amt
+        o["note"] = note
+        bc[o["c"]] = key
+    _save_bc(bc)
+
+    for r in rows:
+        amt = r["target"]
+        astr = f"空 {abs(amt):,.0f}" if amt < 0 else f"{amt:,.0f}"
+        print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}{astr:>10} U  {r['note']}")
+
+    urgent = [o for o in rows
+              if o["action"] in ("开仓", "平仓", "清底仓", "建底仓",
+                                 "止损临近", "即将到期")]
     # 以「所有品种里最新的那根已收盘 4H」为准，各币数据源不同、可能差一根
     bar = max((o["bar"] for o in rows), default=None)
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),

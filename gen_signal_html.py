@@ -16,7 +16,7 @@ OUT = "signal_now.html"
 
 d = json.load(open(SRC, encoding="utf-8"))
 COINS = d["coins"]
-urgent = [o for o in COINS if o["action"] in ("开仓", "平仓", "止损临近", "即将到期")]
+urgent = [o for o in COINS if o["action"] in ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")]
 holds = [o for o in COINS if o["pos"]]
 blocked = [o for o in COINS if o["gate_blocked"]]
 errs = d.get("errors") or []
@@ -55,7 +55,8 @@ def state_color(s):
 if urgent:
     act_rows = ""
     for o in urgent:
-        c = {"开仓": UP, "平仓": DN, "止损临近": "#ef6c00", "即将到期": "#6a1b9a"}[o["action"]]
+        c = {"开仓": UP, "平仓": DN, "清底仓": "#d84315", "建底仓": "#1565c0",
+             "止损临近": "#ef6c00", "即将到期": "#6a1b9a"}[o["action"]]
         act_rows += (
             f'<tr><td style="padding:8px 10px;border-bottom:1px solid #f0d9d9;font-size:13px">'
             f'<b style="color:{c}">{o["action"]}</b></td>'

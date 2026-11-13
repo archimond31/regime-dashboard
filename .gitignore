@@ -151,3 +151,9 @@ deploy/heartbeat.url
 !_gen_5000_report.py
 !_bt_5000.html
 # 不入库：_bt_5000.json（逐日净值与逐笔中间量，重跑 _bt_5000.py 即可生成）
+
+# 底仓动作台账（同 .notify_state.json，只对本机有意义，不入库）
+# _base_clear.json
+# 翻空到建空的间隔诊断（结论快照，随仓库发布）
+!_diag_flip_gap.py
+!_diag_flip_gap2.py
