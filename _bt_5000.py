@@ -63,15 +63,16 @@ for _k in list(V2.SYMBOLS):
 V2.load_all()
 
 
-def nav_daily(b4, base, pos, k0):
+def nav_daily(b4, base, pos, k0, f4=None):
     nav, out = 1.0, {}
+    fd = F4 if f4 is None else f4
     for k in range(k0 + 1, len(b4)):
         r = b4[k]["close"] / b4[k - 1]["close"] - 1
         x = 1 + pos[k] * r
         nav *= x if x > 0 else 0.0
         sl = (pos[k] - base[k]) if BT.SPOT_BASE else pos[k]
-        if F4 and sl:
-            nav *= (1 - F4 * sl)
+        if fd and sl:
+            nav *= (1 - fd * sl)
         if pos[k] != pos[k - 1]:
             nav *= (1 - BT.COST * abs(pos[k] - pos[k - 1]))
         out[b4[k]["date"]] = nav
@@ -353,6 +354,30 @@ for d0 in ("2025-01-01", "2026-01-01", "2026-07-01"):
     print(f"{d0:<12}{CAP * st['final']:>11,.0f} U{st['ret'] * 100:>+10.1f}%"
           f"{st['dd'] * 100:>9.1f}%{st['n']:>7}", flush=True)
 
+# ---------- 资金费敏感性（做空的人必须看这个）----------
+# 回测口径是「空头按 3bp/日 收钱」（sl 为负 → 1-F4*sl > 1）。
+# 这在正资金费环境成立；一旦市场转负（熊末常见），空头反过来付钱。
+# 所以这里把资金费从 +3bp 一路扫到 -10bp，看空头层还剩多少。
+print(f"\n资金费敏感性（{BEST}，1.5× 合约口径）")
+print("-" * 82)
+print(f"{'资金费/日':<14}{'期末':<14}{'收益':>11}{'回撤':>10}{'相对基准':>12}")
+print("-" * 82)
+fund_rows = []
+base_ret = None
+for fd_bp in (3, 1, 0, -1, -3, -10):
+    navs, ws = [], []
+    for c in COINS:
+        b4c, basec, posc = raw[c]
+        k0 = next(k for k in range(len(b4c)) if b4c[k]["date"] >= D0)
+        navs.append(nav_daily(b4c, basec, posc, k0, f4=fd_bp / 1e4 / 6.0))
+        ws.append(PLANS[BEST][c])
+    st = stats(fixed_share(navs, ws))
+    if base_ret is None:
+        base_ret = st["ret"]
+    fund_rows.append({"bp": fd_bp, "final": st["final"], "ret": st["ret"], "dd": st["dd"]})
+    print(f"{fd_bp:>+4d} bp{'':<7}{CAP * st['final']:>10,.0f} U{st['ret'] * 100:>10.1f}%"
+          f"{st['dd'] * 100:>9.1f}%{(st['ret'] - base_ret) * 100:>+10.1f}pp", flush=True)
+
 json.dump({
     "cap": CAP, "coins": COINS, "plans": {k: {kk: vv for kk, vv in v.items() if kk != "curve"}
                                           for k, v in res.items()},
@@ -360,5 +385,6 @@ json.dump({
     "contrib": contrib_rows, "capcheck": cap_rows, "crv_scan": crv_scan,
     "months": b["months"], "dates": [d for d, _ in b["curve"]], "best": BEST,
     "start_rows": start_rows, "spot_rows": spot_rows, "spot_x": spot_x,
+    "fund_rows": fund_rows,
 }, open("_bt_5000.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print("\n已写出 _bt_5000.json", flush=True)

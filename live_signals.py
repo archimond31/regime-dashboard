@@ -188,16 +188,18 @@ def analyze(c, now):
             o["note"] = (f"需{'涨' if o['want']>0 else '跌'} {o['need']:.2f}% 才触发"
                          if o["need"] is not None else "无方向")
 
-    # ---- 按 portfolio_config 折算建议持仓金额 ----
-    # 持仓中一律按满峰值算（已经在场，没有"只建一半"的问题）；
+    # ---- 按 portfolio_config 折算建议持仓金额（负数=空头）----
+    # 持仓中一律按满峰值算（已经在场，没有「只建一半」的问题）；
     # 空仓时才区分「只底仓」与「已触发上满峰值」。
+    # 日线已翻转的仓不反手，先归零 —— 反手要等下一根 4H 的突破确认。
     at_peak = bool(holding) or bool(o.get("triggered"))
-    tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak)
-    # 现货配置不做空：若当前是空头持仓，目标金额必然是 0，得说清楚不是算错了
-    if holding and holding["side"] < 0 and tgt == 0:
-        why = "空头持仓｜现货配置不含做空，此仓应平掉（要做空请单独走合约账户）"
-        o["spot_conflict"] = True
+    closing = bool(holding and holding.get("flipped"))
+    tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing)
+    # 被闸门拦住时 target 恒为 0，但原因不是「没跌破」，得说清楚
+    if o.get("gate_blocked") and tgt == 0 and not holding:
+        why = f"波动闸门拦截（分位 {pctv * 100:.0f}% > {VOL_Q * 100:.0f}%）→ 不开新仓"
     o["target"] = round(tgt)
+    o["side"] = "多" if tgt > 0 else ("空" if tgt < 0 else "—")
     o["target_note"] = why
     o["cap_flag"] = PC.cap_check(tgt, c)[1]
     o["slices"] = PC.orders_needed(tgt, c)
@@ -211,8 +213,9 @@ def main():
         try:
             rows.append(analyze(c, now))
             r = rows[-1]
-            print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}"
-                  f"{r['target']:>7,.0f} U  {r['note']}")
+            amt = r["target"]
+            astr = f"空 {abs(amt):,.0f}" if amt < 0 else f"{amt:,.0f}"
+            print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}{astr:>10} U  {r['note']}")
         except Exception as e:
             errs.append({"c": c, "err": f"{type(e).__name__}: {e}"})
             print(f"  {c:<5} 失败 {errs[-1]['err']}")
@@ -222,7 +225,7 @@ def main():
     bar = max((o["bar"] for o in rows), default=None)
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
-           "bar4h": bar, "capital": PC.CAPITAL,
+           "bar4h": bar, "capital": PC.CAPITAL, "allow_short": PC.ALLOW_SHORT,
            "coins": rows, "urgent": [o["c"] for o in urgent], "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)
