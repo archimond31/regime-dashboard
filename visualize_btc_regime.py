@@ -442,14 +442,24 @@ def build(dates, closes, states):
     return pts, segs
 
 
-def merge_short_segments(segs, min_days=3):
+def merge_short_segments(segs, min_days=3, keep_last=True):
     """把持续天数 < min_days 的过渡碎片合并到相邻段：
       左右同状态 → 三段并一；否则并入天数更多的邻居。用于消除擦边抖动/假穿越纠错
-      产生的 1~2 天碎区间。返回新列表，不改原数据。"""
+      产生的 1~2 天碎区间。返回新列表，不改原数据。
+
+    keep_last=True（默认）：**最后一段永不合并**。
+      它是「进行中」的当前状态，天数少不是因为它短命，而是因为今天才第 N 天。
+      把它并进前一个状态，等于让色带末端宣称「当前处于上升」，而抬头/总览写的
+      是状态机给的「下降」—— 同一套状态机、两个结论，看图的人只会以为数据错位。
+      （2026-11-13 SOL 实例：DOWN 起始 11-11，到 11-12 才 2 天 < 3，被并进前面的
+       UP，色带尾部显「上升 11-06→11-12、-9.3%」，与总览「下降」直接冲突。）
+      碎片合并的目的是抹平**已完成的**历史抖动，不该替状态机改写现在。
+    """
     segs = [dict(s) for s in segs]
     while len(segs) > 1:
         idx = None
-        for i, s in enumerate(segs):
+        limit = len(segs) - 1 if keep_last else len(segs)
+        for i, s in enumerate(segs[:limit]):
             if s["days"] < min_days:
                 idx = i
                 break
@@ -598,9 +608,13 @@ def gen_svg(pts, segs, div_marks=None):
 
 def seg_table(segs):
     rows = ""
-    for s in segs:
+    for i, s in enumerate(segs):
         chg = (s["end_close"] / s["start_close"] - 1) * 100
-        rows += (f"<tr><td style='color:{STATE_COLOR[s['state']]};font-weight:bold;'>{STATE_CN[s['state']]}</td>"
+        # 最后一段是「进行中」的当前状态：它会随行情继续延长，也可能明天就翻转，
+        # 和上面那些已经封口的历史段不是一回事，标出来免得被当成定论。
+        live = (" <span style='font-weight:normal;color:#888;font-size:10px;'>进行中</span>"
+                if i == len(segs) - 1 else "")
+        rows += (f"<tr><td style='color:{STATE_COLOR[s['state']]};font-weight:bold;'>{STATE_CN[s['state']]}{live}</td>"
                  f"<td>{s['start']}</td><td>{s['end']}</td><td style='text-align:center;'>{s['days']}</td>"
                  f"<td style='text-align:right;'>{s['start_close']:,.0f}</td>"
                  f"<td style='text-align:right;'>{s['end_close']:,.0f}</td>"

@@ -382,7 +382,9 @@ def main():
   {render_summary(summary)}
 
   <h2 class="sec">各品种 2024 年以来趋势区间</h2>
-  <p class="sub">色带为每日状态区间；▲=底背离(切上升) ▼=顶背离(切下降)；持续 &lt;{MIN_DAYS} 天碎片已合并。</p>
+  <p class="sub">色带为每日状态区间；▲=底背离(切上升) ▼=顶背离(切下降)；持续 &lt;{MIN_DAYS} 天碎片已合并，
+  <b>但最后一段（进行中的当前状态）不合并</b> —— 它天数少是因为还没走完，不是因为它短命；
+  并掉它会让色带尾部与上方总览的「当前状态」互相矛盾。</p>
   <div id="cardwrap">{card_blocks}</div>
   <div class="empty" id="empty">没有符合筛选条件的品种</div>
 
