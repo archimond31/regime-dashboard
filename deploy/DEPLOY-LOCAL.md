@@ -120,17 +120,22 @@ C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime
 C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage
 ```
 
-**这种方式必须手动改一处**，否则一定出错：
+**这种方式建议改一处，但严格说不改也能跑** —— 得分清你 Run 的是哪个脚本：
 
 ```
 Run → Edit Configurations → Working directory
-改为： C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy
+建议改为： C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy
 ```
 
-默认值是 boros 根，不改的话脚本会以 boros 根为工作目录，于是：
-- `_signal.json` / `signal_now.html` 写进 boros 根（和别的文件混在一起）
-- `.cache_binance` 找不到 → 每次从零下载 77MB
-- `.notify_state.json` 找不到 → 去重失效，可能重复发信
+- **Run `run_signal.py`：不受影响。** 它内部用 `subprocess.run(..., cwd=HERE)` 把三个子脚本的
+  工作目录切到项目根，自己读台账也用绝对路径（`os.path.join(HERE, ...)`）。
+  实测在 boros 根下启动同样正确。
+- **直接 Run 子脚本（`live_signals.py` / `gen_signal_html.py` / `notify_mail.py`）：必须改。**
+  这三个用的是相对路径（`_signal.json`、`signal_now.html`、`.cache_binance`、`.notify_state.json`）。
+  不改的症状：文件写到 boros 根、K 线缓存找不到要重下 77MB、去重台账丢失可能重复发信。
+
+所以：只调主入口就不用管这一项；要在 PyCharm 里单独跑某一步（比如只想重发一封邮件），
+务必先把 Working directory 指到项目根。
 
 方式 B 的另一个代价：boros 里有 `data/ahist`（6000+ 只股票的 parquet），PyCharm 会连它一起索引，
 首次打开可能要等几分钟。
