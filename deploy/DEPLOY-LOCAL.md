@@ -85,6 +85,81 @@ powershell -ExecutionPolicy Bypass -File deploy\install_task.ps1 -Remove
 powershell -ExecutionPolicy Bypass -File deploy\install_task.ps1
 ```
 
+**不想记命令的话，双击 `deploy\task_ctl.cmd` 就行**：
+
+| 操作 | 效果 |
+|---|---|
+| 双击（无参数） | 显示 State / 上次运行 / 上次结果 / 下次运行 |
+| `task_ctl.cmd off` | 暂停自动跑 |
+| `task_ctl.cmd on` | 恢复自动跑 |
+| `task_ctl.cmd run` | 立刻跑一次 |
+
+带参数调用时窗口不会停留，可以直接在资源管理器的地址栏里敲：
+`cmd /c task_ctl.cmd off`
+
+---
+
+## 3.1 在 PyCharm 里手动跑
+
+### 打开哪个目录
+
+**打开这个目录，不要打开上层仓库根：**
+
+```
+C:\Users\archimond\WorkBuddy\2026-11-04-16-19-12\research\regime_rsi_ema_strategy
+```
+
+`File → Open` 选它。原因是 `run_signal.py` 依赖的 13 个模块（`live_signals.py`、`test_regime_fit.py`、
+`strategy_1h_rsi.py`…）全都平铺在这一层，打开它才能在左侧面板一屏看全；打开上层仓库根会多出
+上百个无关文件。
+
+### 找到并运行
+
+1. 左侧 Project 面板点一下，直接键盘敲 `run_signal` → 自动定位到 `run_signal.py`
+2. 右键 → **Run 'run_signal'**（或点行号区的绿色三角）
+3. 停止：红色方块，`Ctrl+F2`
+
+### 一定要检查的一处：Working directory
+
+`Run → Edit Configurations → Working directory` 必须是：
+
+```
+C:\Users\archimond\WorkBuddy\2026-11-04-16-19-12\research\regime_rsi_ema_strategy
+```
+
+这是默认值，**别改**。脚本用相对路径读写 `_signal.json`、`signal_now.html`、`.cache_binance`、
+`.notify_state.json`，工作目录一错就会「跑到别的地方去了」——表现是每次都从零下载 K 线、
+或者邮件里持仓莫名其妙。
+
+Interpreter 随便选 3.8 以上的都行，这套代码**零第三方库**，不需要 venv。
+
+### 常用参数（Script parameters 里填）
+
+| 参数 | 效果 |
+|---|---|
+| 留空 | 正常跑：有动作发信号信，无动作则当天第一封补日报 |
+| `--dry` | 演练：完整跑，但**绝不发信**，只打印判定 |
+| `--no-mail` | 只重新生成 `signal_now.html`，完全不碰邮件 |
+| `--force --dry` | 绕过「同 bar 跳过」，强制完整跑一遍，仍然不发信 |
+| `--always` | 无动作也发（**会真发**，别拿它试验） |
+
+### 一个必须注意的冲突
+
+**PyCharm 里手动跑、和计划任务自动跑，是两个独立进程，共用同一份台账文件。**
+
+同时跑会出问题：两边都读 `.notify_state.json` 判断「这根 4H 发过没有」，可能都判为没发过 →
+各发一封。窗口只有 40 秒，概率不高，但不是零。
+
+所以手动跑之前，先暂停任务；或者干脆只用 `--dry`（演练不发信，不会重复）：
+
+```
+双击 deploy\task_ctl.cmd off      → 改 PyCharm 里的代码 / 手动跑
+双击 deploy\task_ctl.cmd on       → 跑完恢复
+```
+
+要打断点调试的话，右键 → **Debug 'run_signal'**，加 `--dry` 参数，不会误发信。
+
+
 查看日志最后 40 行：
 
 ```powershell
