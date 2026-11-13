@@ -9,6 +9,7 @@
 """
 import json
 import os
+import datetime as _dt
 
 SRC = "_signal.json"
 OUT = "signal_now.html"
@@ -180,14 +181,29 @@ if errs:
                  f'<br>这些品种本轮没有信号，不代表它没有信号。</div>')
 
 # 各币最新已收盘 4H 不一定同步：Binance 走按日归档，当天文件要到次日才发布，
-# 于是它比 Hyperliquid 的实时接口慢一根。顶部若只写「最新」，用户拿它减去
-# 「已持 N 根 × 4h」会算不回表里的入场时间 —— 所以差一根就明写出来。
+# 于是它比 Hyperliquid 的实时接口慢 —— 慢多少取决于跑的时刻：
+#   UTC 00~02 点跑（北京 08~10 点），前一天的日归档往往还没发布 → 直接落后一整天然（6 根）
+#   其余时段 → 落后 1 根
+# 这个差值必须显式说出来，否则「动作」列会被读成最新的判断，而它其实是昨天的。
 _bars = sorted({o["bar"] for o in COINS if o.get("bar")})
 _lag = ""
+stale_block = ""
 if len(_bars) > 1:
-    _n_lag = sum(1 for o in COINS if o.get("bar") == _bars[0])
-    _lag = (f'；其中 {_n_lag} 个品种停在 <b>{_bars[0]}</b>，'
-            f'因 Binance 按日归档要到次日才发布，比实时接口慢一根')
+    _f = "%Y-%m-%d %H:%M"
+    _gap = int(((_dt.datetime.strptime(_bars[-1], _f)
+                 - _dt.datetime.strptime(_bars[0], _f)).total_seconds()) // (4 * 3600))
+    _old = [o["c"] for o in COINS if o.get("bar") == _bars[0]]
+    _lag = (f'；其中 {len(_old)} 个品种停在 <b>{_bars[0]}</b>'
+            f'（落后 {_gap} 根 4H，因 Binance 按日归档要到次日才发布）')
+    if _gap >= 2:
+        # 落后两根以上就不是「稍慢」，是「用昨天的数据在做今天的判断」，必须阻断阅读
+        stale_block = (
+            f'<div style="border:1px solid #ff8a65;background:#fbe9e7;border-radius:8px;'
+            f'padding:10px 12px;margin:14px 0;font-size:12.5px;color:#bf360c;line-height:1.7">'
+            f'<b>数据不同步：{len(_old)} 个品种落后 {_gap} 根 4H（{_gap * 4} 小时）</b><br>'
+            f'{" ".join(_old)} 这一轮用的是 <b>{_bars[0]}</b> 的收盘数据，'
+            f'其余品种已到 {_bars[-1]}。<b>这几个品种的「动作」列不代表最新状态</b> —— '
+            f'请等下一班（Binance 日归档发布后）再看。</div>')
 
 html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -205,6 +221,7 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 
 <table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin:0 -8px 4px">{kpi_html}</table>
 {err_block}
+{stale_block}
 {action_block}
 {hold_block}
 {all_block}

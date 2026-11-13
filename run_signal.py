@@ -48,6 +48,18 @@ def processed_bar():
         return None
 
 
+def sent_today():
+    """今天（北京）是否已经真的发出过一封邮件。"""
+    if not os.path.exists(STATE):
+        return False
+    try:
+        st = json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return False
+    bj = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=8)).strftime("%Y-%m-%d")
+    return st.get("last_sent_bj") == bj
+
+
 def step(name, args, fatal=True):
     print(f"\n{'=' * 62}\n▶ {name}\n{'=' * 62}", flush=True)
     r = subprocess.run([PY] + args, cwd=HERE)
@@ -63,14 +75,16 @@ def main():
     no_mail = "--no-mail" in argv
     passthru = [a for a in argv if a in ("--always", "--dry", "--force", "--digest")]
 
-    # 快速跳过：这根本 4H 已经完整算过一遍、且上轮没有待处理动作时，
-    # 没必要再拉一遍全量 K 线。正常一轮约 40 秒，跳过只要 0.1 秒。
-    # 去重、日报、强制重发这三种情况必须往下走。
+    # 快速跳过：这根本 4H 已经完整算过一遍、**且今天已经真的发出过一封**时，
+    # 没必要再拉一遍全量 K 线。正常一轮约 40 秒，跳过只要 0.3 秒。
+    # 「今天还没有信」必须往下走 —— 否则当天第一封（保底日报）永远补不出来：
+    # 上一轮算完、无动作、跳过发信，台账里只有 bar4h 没有 last_sent_bj，
+    # 这时若还按 bar4h 相同就跳，收件箱就会一直空着。
     bypass = any(a in argv for a in ("--digest", "--force", "--always"))
     if not no_mail and not bypass:
         cur, done = current_bar(), processed_bar()
-        if done == cur:
-            print(f"[跳过] 这根本 4H（{cur}）已处理过，无新内容。", flush=True)
+        if done == cur and sent_today():
+            print(f"[跳过] 这根本 4H（{cur}）已处理过、且今天已发过信，无新内容。", flush=True)
             print("       要强制执行请加 --always 或 --force", flush=True)
             return 0
 

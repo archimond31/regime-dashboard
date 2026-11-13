@@ -15,12 +15,13 @@ name: Crypto Signal (4H)
 #   dashboard 应 13:30 → 实际 20:30（+7h）、前一晚 23:03（+9h33m）
 on:
   schedule:
-    # UTC 整点 05 分跑；01 点那次（北京 09:05）自动转日报
+    # UTC 整点 05 分跑。发不发日报由脚本读台账决定（今天北京还没有信 → 这封就是日报），
+    # 不再依赖「01 点那一班」—— GitHub 的 schedule 从来没准时过。
     - cron: '5 0,1,4,8,12,16,20 * * *'
   workflow_dispatch:
     inputs:
       digest:
-        description: '强制按日报模式发（每天北京最多一封）。UTC 01 点那次会自动开启'
+        description: '强制按日报模式发（每天北京最多一封）；不勾也会在当天第一封自动补'
         type: boolean
         default: false
       always:
@@ -116,12 +117,14 @@ jobs:
           # 用 if 而不是 `[ ... ] && ARGS=...`：后者条件为假时整行返回非 0，
           # 依 bash -e 的例外规则虽然不会中断，但那是隐式豁免。if 语义明确。
           ARGS=""
-          HOUR=$(date -u +%H)
-          DIGEST="${{ inputs.digest }}"
-          # UTC 01 点（北京 09:05）那一次默认转日报，外部定时器不必额外传参
-          if [ "$DIGEST" = "true" ] || [ "$HOUR" = "01" ]; then ARGS="$ARGS --digest"; fi
+          # 不再按 `date -u +%H == 01` 判定日报：schedule 实测延迟 30~60 分钟甚至整班漏跑，
+          # 最近 7 次运行没有一次落在 01 点，日报因此一次都没发出去。
+          # 「今天有没有发过」改由 notify_mail.py 读台账 last_sent_bj 自己判断。
+          if [ "${{ inputs.digest }}" = "true" ]; then ARGS="$ARGS --digest"; fi
           if [ "${{ inputs.always }}" = "true" ]; then ARGS="$ARGS --always"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
-          echo "UTC 小时：$HOUR"
-          echo "参数：${ARGS:-（默认：有动作才发）}"
+          echo "UTC 时刻：$(date -u +'%Y-%m-%d %H:%M')　参数：${ARGS:-（自动判定）}"
           python run_signal.py $ARGS
+          echo "--- 发信台账（bar4h=算到哪根 4H，last_sent_bj=今天是否已有信）---"
+          cat .notify_state.json 2>/dev/null || echo "(台账不存在)"
+          echo
