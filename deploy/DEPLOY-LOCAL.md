@@ -1,5 +1,11 @@
 # 本地运行方案（Windows 任务计划）
 
+> **只是想让它跑起来？不用看这份文档。**
+> 在 PyCharm 里打开 `monitor.py` 按运行，一个窗口一直开着就行，Ctrl+C 停。
+> 本文档里的计划任务方案（`install_task.ps1`）已于 2026-11-13 停用 ——
+> 两条路会在同一分钟抢跑，让同一根 4H 发出两封邮件（台账只按 bar 去重，
+> 同一秒双启动两边都还没写台账，挡不住）。要切回计划任务用 `deploy\task_ctl.cmd on`。
+
 > 决策：2026-11-13，信号链路从 GitHub Actions 改为本机全时段跑。
 > 云端 `signal.yml` 的 `schedule` 已停用，只保留 `workflow_dispatch` 手动兜底。
 
