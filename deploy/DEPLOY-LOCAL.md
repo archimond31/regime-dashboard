@@ -143,6 +143,29 @@ Run → Edit Configurations → Working directory
 
 Interpreter 随便选 3.8 以上的都行，这套代码**零第三方库**，不需要 venv。
 
+### 解释器报 `CreateProcess error=2` 怎么办
+
+症状：
+
+```
+Cannot run program "...\pythonProject1\venv\Scripts\python.exe"
+(in directory "...\regime_rsi_ema_strategy"): CreateProcess error=2, 系统找不到指定的文件
+```
+
+这是 PyCharm 的项目解释器指向了一个**已被删除的 venv**，与代码无关。
+`boros_funding_arbitrage` 有自己的 `.venv`（3.13.9、471 个包），改指它即可：
+
+`Ctrl+Alt+S` → `Project: boros_funding_arbitrage` → `Python Interpreter`
+→ `Add Local Interpreter` → `Virtualenv` → `Existing`
+→ 填 `...\boros_funding_arbitrage\.venv\Scripts\python.exe`
+
+两个要点：
+
+- **不影响计划任务**。`deploy/run_signal.cmd` 里写死的是独立安装的
+  `Python313\python.exe`，不经过 PyCharm、不依赖项目 venv。
+- 同一个配置也决定 A 股脚本能不能跑。解释器坏掉时 `a_share_stock_picker.py` 之类
+  同样启动不了，改回 `.venv` 是一举两得。
+
 ### 嵌套 git 仓库的注意点
 
 `regime_rsi_ema_strategy` 自带 `.git`（指向 `archimond31/regime-dashboard`），放进 `boros_funding_arbitrage`
