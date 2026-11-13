@@ -22,7 +22,7 @@ import json
 import os
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from visualize_btc_regime import (
     daily_states, build, merge_short_segments, gen_svg, seg_table, fetch_binance_daily,
@@ -313,7 +313,10 @@ def main():
                    if c["n_seg"] else "")
                 + "</div>")
 
-    run_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 必须显式 +8：CI runner 是 UTC，`datetime.now()` 拿到的是 UTC，
+    # 但下面一行标的是「（北京时间）」—— 于是线上一直少 8 小时。
+    # 本地跑反而看不出问题（本机就是东八区，naive now 恰好等于北京时间）。
+    run_at = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
     n_total = len(ASSETS)
     n_stale = sum(1 for s in summary if s.get("stale"))
     n_block = sum(1 for s in summary if s.get("gate") == "block")

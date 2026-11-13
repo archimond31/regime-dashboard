@@ -504,6 +504,19 @@ STATE_COLOR = {"UP": "#d23c3c", "RANGE": "#b8860b", "DOWN": "#1a7f37"}
 STATE_HEX = {"UP": "#e8b4b4", "RANGE": "#e8d9a8", "DOWN": "#b4d8b4"}
 
 
+def _px(v):
+    """价格自适应小数位。
+
+    原来一律 `{:,.0f}`，于是 CRV(0.24)、UNI(5.9) 这一类在区间表和纵轴刻度上
+    全被打印成「0」—— 表格里「起始价 0 / 结束价 0 / +0.1%」看着像数据坏了。
+    """
+    if v >= 1000:
+        return f"{v:,.0f}"
+    if v >= 1:
+        return f"{v:,.2f}"
+    return f"{v:,.4f}"
+
+
 def iso_week_key(date_str):
     """'2026-11-09' → (2026, 45)，ISO 周（周一起算）分组键。跨市场统一。"""
     y, w, _ = datetime.strptime(date_str, "%Y-%m-%d").isocalendar()
@@ -572,7 +585,7 @@ def gen_svg(pts, segs, div_marks=None):
         yy = TOP + plot_h * i / 4
         val = pmax - (pmax - pmin) * i / 4
         p.append(f'<line x1="{LEFT}" y1="{yy:.1f}" x2="{W - RIGHT}" y2="{yy:.1f}" stroke="#e0e0e0"/>')
-        p.append(f'<text x="{LEFT - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="10" fill="#666">{val:,.0f}</text>')
+        p.append(f'<text x="{LEFT - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="10" fill="#666">{_px(val)}</text>')
     cur = datetime(d0.year, d0.month, 1)
     while cur <= d1:
         if cur.month in (1, 4, 7, 10):
@@ -616,8 +629,8 @@ def seg_table(segs):
                 if i == len(segs) - 1 else "")
         rows += (f"<tr><td style='color:{STATE_COLOR[s['state']]};font-weight:bold;'>{STATE_CN[s['state']]}{live}</td>"
                  f"<td>{s['start']}</td><td>{s['end']}</td><td style='text-align:center;'>{s['days']}</td>"
-                 f"<td style='text-align:right;'>{s['start_close']:,.0f}</td>"
-                 f"<td style='text-align:right;'>{s['end_close']:,.0f}</td>"
+                 f"<td style='text-align:right;'>{_px(s['start_close'])}</td>"
+                 f"<td style='text-align:right;'>{_px(s['end_close'])}</td>"
                  f"<td style='text-align:right;color:{'#d23c3c' if chg >= 0 else '#1a7f37'};'>{chg:+.1f}%</td></tr>")
     return f"""<table border="0" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-size:11px;">
 <tr style="background:#f0f0f0;text-align:left;"><th>状态</th><th>起始</th><th>结束</th><th>天数</th><th>起始价</th><th>结束价</th><th>涨跌</th></tr>{rows}</table>"""
@@ -664,7 +677,7 @@ def main():
         for s in segs:
             chg = (s["end_close"] / s["start_close"] - 1) * 100
             print(f"  [{STATE_CN[s['state']]:3}] {s['start']} ~ {s['end']}  {s['days']:>3}天  "
-                  f"{s['start_close']:>8,.0f} -> {s['end_close']:>8,.0f}  ({chg:+.1f}%)")
+                  f"{_px(s['start_close']):>10} -> {_px(s['end_close']):>10}  ({chg:+.1f}%)")
 
     blocks = []
     for key, label, pts, segs, marks in results:
