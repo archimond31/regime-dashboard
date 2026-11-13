@@ -143,3 +143,11 @@ _sig.png
 logs/
 # 不入库：heartbeat.url（含 healthchecks.io 的 ping UUID，等同口令）
 deploy/heartbeat.url
+
+# 组合仓位配置 —— 实盘唯一真源（权重 / 敞口 / 容量红线都在里面）
+!portfolio_config.py
+# 5000 U 配置的回放与报告（结论快照，随仓库发布）
+!_bt_5000.py
+!_gen_5000_report.py
+!_bt_5000.html
+# 不入库：_bt_5000.json（逐日净值与逐笔中间量，重跑 _bt_5000.py 即可生成）

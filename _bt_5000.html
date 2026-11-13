@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>5000 U 组合配置 · 2026 回放</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:34px 30px 60px;background:#f4f6f8;color:#1c2b36;
+font:14px/1.72 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1040px;margin:0 auto}
+h1{font-size:25px;margin:0 0 6px;letter-spacing:-.3px}
+.lead{color:#7b8794;font-size:13px;margin-bottom:26px}
+h2{font-size:16px;margin:34px 0 12px;padding-left:9px;border-left:3px solid #16324f}
+h3{font-size:13.5px;margin:20px 0 8px;color:#16324f}
+.card{background:#fff;border:1px solid #e3e8ec;border-radius:9px;padding:18px 20px;margin:14px 0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 6px}
+.kpi{background:#fff;border:1px solid #e3e8ec;border-radius:9px;padding:14px 16px}
+.kpi .t{font-size:11.5px;color:#7b8794;margin-bottom:3px}
+.kpi .v{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.kpi .s{font-size:11.5px;color:#7b8794;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+th{background:#eef2f5;font-weight:600;text-align:left;padding:7px 9px;
+border-bottom:1px solid #dde4ea;font-size:11.5px;color:#44586a;white-space:nowrap}
+td{padding:6px 9px;border-bottom:1px solid #f0f3f5}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+td.c,th.c{text-align:center}
+tr.hl td{background:#fffdf2}
+tr:hover td{background:#fafcfd}
+.warn{background:#fff6f5;border-left:3px solid #c0392b;padding:13px 16px;border-radius:0 6px 6px 0;margin:14px 0}
+.ok{background:#f4faf6;border-left:3px solid #1e8449;padding:13px 16px;border-radius:0 6px 6px 0;margin:14px 0}
+.note{background:#f7f9fb;border-left:3px solid #7b8794;padding:12px 15px;border-radius:0 6px 6px 0;
+margin:12px 0;font-size:12.5px;color:#41525f}
+code{background:#eef2f5;padding:1px 5px;border-radius:3px;font-size:12px;
+font-family:ui-monospace,Consolas,monospace}
+.foot{margin-top:36px;padding-top:14px;border-top:1px solid #dfe5ea;color:#7b8794;font-size:11.5px}
+b.hi{color:#c0392b}
+</style></head><body><div class="wrap">
+
+<h1>5000 U 组合配置 · 2026 年回放</h1>
+<div class="lead">数据区间 2026-01-01 → 2026-11-13 · 317 个交易日 ·
+10 个品种 · 三层骨架（日线定方向 / 4H 突破加仓 / 状态翻转出场）</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="t">期末（现货常规档）</div>
+    <div class="v">6,878 U</div>
+    <div class="s">2026 单年</div></div>
+  <div class="kpi"><div class="t">收益</div>
+    <div class="v" style="color:#c0392b">+37.6%</div>
+    <div class="s">跨 2025 起 +25.7%</div></div>
+  <div class="kpi"><div class="t">最大回撤</div>
+    <div class="v" style="color:#1e8449">-12.7%</div>
+    <div class="s">跨 2025 起 -25.8%</div></div>
+  <div class="kpi"><div class="t">单位回撤收益</div>
+    <div class="v">2.95</div>
+    <div class="s">10 币等权满仓买入持有：-12.9% / -43%</div></div>
+</div>
+
+<div class="warn"><b>先说三条被数据推翻的判断。</b>这轮配置改动的起点是我上一轮的建议，
+但把它们逐个回测后，三条里有两条是错的：
+<ol style="margin:8px 0 0;padding-left:22px">
+<li><b>「HYPE 该降权到 5%」——错。</b>降权后收益从 +74.2% 掉到 +70.0%，
+回撤反而从 -15.4% 升到 <b>-17.8%</b>。它与 AAVE 的相关性只有 0.06，
+是组合里少见的真分散来源，砍掉它等于砍掉减震器。</li>
+<li><b>「1.5× 敞口」——只在 2026 年成立。</b>把起点拉到 2025-01，
+1.5× 的回撤是 <b>-34.9%</b>，1.0× 是 -23.1%，单位回撤收益 1.34 vs 1.61。
+放大敞口在跨周期上是亏的，所以最终选 1.0×。</li>
+<li><b>「CRV 降权的回测依据」——不可用。</b>CRV 权重从 10% 一路扫到 0%，
+结果是<b>单调变好</b>（8,709 → 9,016 U）。单调到 0% 最好，说明这是
+「剔除当年最差品种」的事后挑选，不是结构性优势。降权的原因只能是容量。</li>
+</ol></div>
+
+<h2>一、最终配置（5000 U）</h2>
+<div class="note">权重基准等权。唯一的偏离是 CRV 降到 7% —— 理由是<b>容量</b>而非回测：
+5000 U 下它单笔峰值 525 U，对最差的 4H 成交额（3.27 万）占 1.6%，
+属于「必须拆单但可接受」的上沿。<br>
+峰值敞口 1.0× 意味着<b>全程不用借钱、不用合约、不做空</b>：底仓 3,333 U 常驻，
+剩余 1,667 U 现金等 4H 突破后加仓。</div>
+<table>
+<tr><th class="c">品种</th><th class="r">权重</th><th class="r">底仓(U)</th>
+<th class="r">加仓层(U)</th><th class="r">峰值(U)</th><th class="r">冲击占最差4H</th>
+<th class="c">容量</th><th class="r">拆单</th></tr>
+<tr><td class="c"><b>BTC</b></td><td class="r">11%</td><td class="r">367</td><td class="r" style="color:#999">183</td><td class="r"><b>550</b></td><td class="r">0.00%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>ETH</b></td><td class="r">11%</td><td class="r">367</td><td class="r" style="color:#999">183</td><td class="r"><b>550</b></td><td class="r">0.01%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>SOL</b></td><td class="r">11%</td><td class="r">367</td><td class="r" style="color:#999">183</td><td class="r"><b>550</b></td><td class="r">0.02%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>BNB</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.03%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>XRP</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.04%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>LINK</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.40%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>UNI</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.10%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>AAVE</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.18%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>HYPE</b></td><td class="r">10%</td><td class="r">333</td><td class="r" style="color:#999">167</td><td class="r"><b>500</b></td><td class="r">0.01%</td><td class="c"><span style="background:#e8f5e9;color:#1e8449;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">宽松</span></td><td class="r">1</td></tr><tr><td class="c"><b>CRV</b></td><td class="r">7%</td><td class="r">233</td><td class="r" style="color:#999">117</td><td class="r"><b>350</b></td><td class="r">1.07%</td><td class="c"><span style="background:#fff3e0;color:#d97706;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600">需拆单</span></td><td class="r">2</td></tr>
+<tr style="background:#eef2f5;font-weight:600"><td class="c">合计</td>
+<td class="r">100%</td><td class="r">3,333</td><td class="r">1,667</td>
+<td class="r">5,000</td><td class="r">—</td><td class="c">—</td><td class="r">11</td></tr>
+</table>
+
+<h2>二、收益曲线（现货常规档，2026）</h2>
+<div class="card"><svg viewBox="0 0 860 250" style="width:100%;height:auto"><line x1="38" y1="212.0" x2="848" y2="212.0" stroke="#eceff1"/><text x="32" y="215.5" text-anchor="end" font-size="9.5" fill="#7b8794">0.90</text><line x1="38" y1="163.5" x2="848" y2="163.5" stroke="#eceff1"/><text x="32" y="167.0" text-anchor="end" font-size="9.5" fill="#7b8794">1.04</text><line x1="38" y1="115.0" x2="848" y2="115.0" stroke="#eceff1"/><text x="32" y="118.5" text-anchor="end" font-size="9.5" fill="#7b8794">1.18</text><line x1="38" y1="66.5" x2="848" y2="66.5" stroke="#eceff1"/><text x="32" y="70.0" text-anchor="end" font-size="9.5" fill="#7b8794">1.32</text><line x1="38" y1="18.0" x2="848" y2="18.0" stroke="#eceff1"/><text x="32" y="21.5" text-anchor="end" font-size="9.5" fill="#7b8794">1.46</text><text x="38.0" y="227" text-anchor="middle" font-size="9.5" fill="#7b8794">01-01</text><text x="240.5" y="227" text-anchor="middle" font-size="9.5" fill="#7b8794">03-21</text><text x="443.0" y="227" text-anchor="middle" font-size="9.5" fill="#7b8794">06-08</text><text x="645.5" y="227" text-anchor="middle" font-size="9.5" fill="#7b8794">08-26</text><text x="848.0" y="227" text-anchor="middle" font-size="9.5" fill="#7b8794">11-13</text><line x1="38" y1="178.5" x2="848" y2="178.5" stroke="#7b8794" stroke-dasharray="3,3" stroke-width="1" opacity=".7"/><path d="M38.0,176.3 L40.6,169.3 L43.1,167.4 L45.7,163.4 L48.3,154.8 L50.8,153.4 L53.4,162.9 L55.9,166.3 L58.5,168.0 L61.1,168.9 L63.6,167.6 L66.2,169.6 L68.8,155.2 L71.3,154.0 L73.9,160.1 L76.4,160.1 L79.0,160.6 L81.6,168.0 L84.1,174.0 L86.7,185.1 L89.3,182.6 L91.8,182.9 L94.4,181.7 L97.0,181.3 L99.5,184.1 L102.1,180.3 L104.6,174.9 L107.2,171.7 L109.8,178.2 L112.3,179.2 L114.9,180.5 L117.5,180.8 L120.0,178.4 L122.6,180.5 L125.2,179.7 L127.7,181.6 L130.3,182.2 L132.8,184.0 L135.4,183.5 L138.0,184.0 L140.5,188.9 L143.1,191.1 L145.7,190.0 L148.2,187.8 L150.8,182.0 L153.3,187.1 L155.9,184.7 L158.5,188.3 L161.0,193.0 L163.6,192.8 L166.2,189.1 L168.7,189.6 L171.3,193.7 L173.9,201.4 L176.4,201.1 L179.0,187.2 L181.5,190.0 L184.1,195.1 L186.7,189.0 L189.2,190.7 L191.8,184.0 L194.4,186.6 L196.9,180.1 L199.5,184.5 L202.1,189.2 L204.6,192.0 L207.2,194.0 L209.7,184.9 L212.3,184.1 L214.9,181.2 L217.4,179.5 L220.0,179.0 L222.6,177.5 L225.1,173.7 L227.7,164.5 L230.2,167.2 L232.8,174.6 L235.4,180.3 L237.9,179.7 L240.5,182.2 L243.1,184.5 L245.6,182.4 L248.2,180.0 L250.8,178.9 L253.3,183.7 L255.9,187.1 L258.4,186.3 L261.0,188.0 L263.6,188.3 L266.1,187.7 L268.7,188.3 L271.3,191.9 L273.8,191.4 L276.4,190.2 L278.9,188.9 L281.5,189.9 L284.1,182.7 L286.6,185.6 L289.2,184.4 L291.8,181.3 L294.3,180.3 L296.9,186.5 L299.5,176.1 L302.0,179.1 L304.6,175.5 L307.1,173.0 L309.7,169.4 L312.3,178.9 L314.8,188.6 L317.4,185.1 L320.0,184.9 L322.5,183.6 L325.1,184.6 L327.7,185.4 L330.2,185.5 L332.8,182.8 L335.3,187.2 L337.9,190.1 L340.5,191.1 L343.0,190.7 L345.6,188.8 L348.2,187.7 L350.7,187.8 L353.3,186.4 L355.8,182.7 L358.4,181.8 L361.0,186.5 L363.5,179.1 L366.1,177.9 L368.7,169.7 L371.2,170.0 L373.8,179.0 L376.4,182.3 L378.9,177.7 L381.5,184.7 L384.0,191.7 L386.6,191.0 L389.2,188.9 L391.7,191.0 L394.3,181.3 L396.9,176.7 L399.4,185.9 L402.0,180.6 L404.6,179.0 L407.1,180.4 L409.7,182.5 L412.2,183.8 L414.8,184.5 L417.4,184.3 L419.9,181.1 L422.5,179.4 L425.1,179.7 L427.6,185.3 L430.2,183.2 L432.7,190.5 L435.3,190.6 L437.9,190.6 L440.4,189.9 L443.0,189.3 L445.6,190.1 L448.1,190.8 L450.7,184.5 L453.3,187.0 L455.8,184.4 L458.4,180.8 L460.9,173.0 L463.5,169.3 L466.1,174.3 L468.6,177.8 L471.2,180.3 L473.8,178.3 L476.3,181.7 L478.9,180.4 L481.4,184.6 L484.0,186.4 L486.6,188.5 L489.1,183.6 L491.7,184.6 L494.3,185.3 L496.8,182.6 L499.4,187.1 L502.0,182.9 L504.5,177.7 L507.1,173.8 L509.6,172.3 L512.2,171.9 L514.8,170.2 L517.3,174.6 L519.9,177.7 L522.5,174.9 L525.0,170.5 L527.6,168.7 L530.2,169.8 L532.7,172.6 L535.3,163.7 L537.8,165.3 L540.4,169.3 L543.0,170.5 L545.5,170.2 L548.1,170.1 L550.7,167.5 L553.2,164.0 L555.8,164.1 L558.3,169.1 L560.9,171.8 L563.5,172.5 L566.0,163.7 L568.6,171.1 L571.2,167.8 L573.7,169.1 L576.3,163.4 L578.9,168.7 L581.4,173.3 L584.0,169.9 L586.5,172.7 L589.1,173.2 L591.7,171.4 L594.2,171.8 L596.8,172.0 L599.4,169.1 L601.9,168.9 L604.5,168.4 L607.1,167.2 L609.6,170.3 L612.2,171.4 L614.7,175.2 L617.3,173.2 L619.9,173.7 L622.4,172.4 L625.0,172.0 L627.6,152.7 L630.1,140.3 L632.7,105.3 L635.2,106.0 L637.8,94.5 L640.4,98.4 L642.9,107.0 L645.5,98.7 L648.1,87.4 L650.6,105.3 L653.2,99.3 L655.8,102.0 L658.3,93.3 L660.9,87.5 L663.4,88.7 L666.0,70.9 L668.6,77.8 L671.1,63.3 L673.7,55.2 L676.3,66.7 L678.8,68.9 L681.4,78.4 L683.9,87.9 L686.5,83.4 L689.1,80.6 L691.6,85.0 L694.2,76.0 L696.8,88.5 L699.3,84.5 L701.9,70.1 L704.5,47.2 L707.0,48.1 L709.6,46.9 L712.1,34.3 L714.7,25.1 L717.3,39.5 L719.8,35.6 L722.4,31.8 L725.0,32.7 L727.5,32.8 L730.1,31.0 L732.7,29.5 L735.2,30.1 L737.8,28.4 L740.3,27.9 L742.9,26.5 L745.5,25.1 L748.0,25.3 L750.6,27.1 L753.2,29.4 L755.7,35.4 L758.3,33.5 L760.8,33.1 L763.4,31.4 L766.0,36.5 L768.5,36.4 L771.1,37.7 L773.7,37.5 L776.2,37.7 L778.8,38.1 L781.4,37.4 L783.9,36.7 L786.5,34.2 L789.0,32.7 L791.6,37.5 L794.2,38.3 L796.7,38.6 L799.3,39.1 L801.9,39.1 L804.4,39.1 L807.0,39.1 L809.6,39.1 L812.1,39.1 L814.7,39.1 L817.2,39.1 L819.8,39.1 L822.4,39.1 L824.9,39.1 L827.5,42.9 L830.1,41.7 L832.6,41.5 L835.2,43.6 L837.7,43.2 L840.3,45.2 L842.9,45.7 L845.4,45.7 L848.0,46.3 L848.0,212 L38.0,212 Z" fill="url(#g1)" opacity=".85"/><path d="M38.0,176.3 L40.6,169.3 L43.1,167.4 L45.7,163.4 L48.3,154.8 L50.8,153.4 L53.4,162.9 L55.9,166.3 L58.5,168.0 L61.1,168.9 L63.6,167.6 L66.2,169.6 L68.8,155.2 L71.3,154.0 L73.9,160.1 L76.4,160.1 L79.0,160.6 L81.6,168.0 L84.1,174.0 L86.7,185.1 L89.3,182.6 L91.8,182.9 L94.4,181.7 L97.0,181.3 L99.5,184.1 L102.1,180.3 L104.6,174.9 L107.2,171.7 L109.8,178.2 L112.3,179.2 L114.9,180.5 L117.5,180.8 L120.0,178.4 L122.6,180.5 L125.2,179.7 L127.7,181.6 L130.3,182.2 L132.8,184.0 L135.4,183.5 L138.0,184.0 L140.5,188.9 L143.1,191.1 L145.7,190.0 L148.2,187.8 L150.8,182.0 L153.3,187.1 L155.9,184.7 L158.5,188.3 L161.0,193.0 L163.6,192.8 L166.2,189.1 L168.7,189.6 L171.3,193.7 L173.9,201.4 L176.4,201.1 L179.0,187.2 L181.5,190.0 L184.1,195.1 L186.7,189.0 L189.2,190.7 L191.8,184.0 L194.4,186.6 L196.9,180.1 L199.5,184.5 L202.1,189.2 L204.6,192.0 L207.2,194.0 L209.7,184.9 L212.3,184.1 L214.9,181.2 L217.4,179.5 L220.0,179.0 L222.6,177.5 L225.1,173.7 L227.7,164.5 L230.2,167.2 L232.8,174.6 L235.4,180.3 L237.9,179.7 L240.5,182.2 L243.1,184.5 L245.6,182.4 L248.2,180.0 L250.8,178.9 L253.3,183.7 L255.9,187.1 L258.4,186.3 L261.0,188.0 L263.6,188.3 L266.1,187.7 L268.7,188.3 L271.3,191.9 L273.8,191.4 L276.4,190.2 L278.9,188.9 L281.5,189.9 L284.1,182.7 L286.6,185.6 L289.2,184.4 L291.8,181.3 L294.3,180.3 L296.9,186.5 L299.5,176.1 L302.0,179.1 L304.6,175.5 L307.1,173.0 L309.7,169.4 L312.3,178.9 L314.8,188.6 L317.4,185.1 L320.0,184.9 L322.5,183.6 L325.1,184.6 L327.7,185.4 L330.2,185.5 L332.8,182.8 L335.3,187.2 L337.9,190.1 L340.5,191.1 L343.0,190.7 L345.6,188.8 L348.2,187.7 L350.7,187.8 L353.3,186.4 L355.8,182.7 L358.4,181.8 L361.0,186.5 L363.5,179.1 L366.1,177.9 L368.7,169.7 L371.2,170.0 L373.8,179.0 L376.4,182.3 L378.9,177.7 L381.5,184.7 L384.0,191.7 L386.6,191.0 L389.2,188.9 L391.7,191.0 L394.3,181.3 L396.9,176.7 L399.4,185.9 L402.0,180.6 L404.6,179.0 L407.1,180.4 L409.7,182.5 L412.2,183.8 L414.8,184.5 L417.4,184.3 L419.9,181.1 L422.5,179.4 L425.1,179.7 L427.6,185.3 L430.2,183.2 L432.7,190.5 L435.3,190.6 L437.9,190.6 L440.4,189.9 L443.0,189.3 L445.6,190.1 L448.1,190.8 L450.7,184.5 L453.3,187.0 L455.8,184.4 L458.4,180.8 L460.9,173.0 L463.5,169.3 L466.1,174.3 L468.6,177.8 L471.2,180.3 L473.8,178.3 L476.3,181.7 L478.9,180.4 L481.4,184.6 L484.0,186.4 L486.6,188.5 L489.1,183.6 L491.7,184.6 L494.3,185.3 L496.8,182.6 L499.4,187.1 L502.0,182.9 L504.5,177.7 L507.1,173.8 L509.6,172.3 L512.2,171.9 L514.8,170.2 L517.3,174.6 L519.9,177.7 L522.5,174.9 L525.0,170.5 L527.6,168.7 L530.2,169.8 L532.7,172.6 L535.3,163.7 L537.8,165.3 L540.4,169.3 L543.0,170.5 L545.5,170.2 L548.1,170.1 L550.7,167.5 L553.2,164.0 L555.8,164.1 L558.3,169.1 L560.9,171.8 L563.5,172.5 L566.0,163.7 L568.6,171.1 L571.2,167.8 L573.7,169.1 L576.3,163.4 L578.9,168.7 L581.4,173.3 L584.0,169.9 L586.5,172.7 L589.1,173.2 L591.7,171.4 L594.2,171.8 L596.8,172.0 L599.4,169.1 L601.9,168.9 L604.5,168.4 L607.1,167.2 L609.6,170.3 L612.2,171.4 L614.7,175.2 L617.3,173.2 L619.9,173.7 L622.4,172.4 L625.0,172.0 L627.6,152.7 L630.1,140.3 L632.7,105.3 L635.2,106.0 L637.8,94.5 L640.4,98.4 L642.9,107.0 L645.5,98.7 L648.1,87.4 L650.6,105.3 L653.2,99.3 L655.8,102.0 L658.3,93.3 L660.9,87.5 L663.4,88.7 L666.0,70.9 L668.6,77.8 L671.1,63.3 L673.7,55.2 L676.3,66.7 L678.8,68.9 L681.4,78.4 L683.9,87.9 L686.5,83.4 L689.1,80.6 L691.6,85.0 L694.2,76.0 L696.8,88.5 L699.3,84.5 L701.9,70.1 L704.5,47.2 L707.0,48.1 L709.6,46.9 L712.1,34.3 L714.7,25.1 L717.3,39.5 L719.8,35.6 L722.4,31.8 L725.0,32.7 L727.5,32.8 L730.1,31.0 L732.7,29.5 L735.2,30.1 L737.8,28.4 L740.3,27.9 L742.9,26.5 L745.5,25.1 L748.0,25.3 L750.6,27.1 L753.2,29.4 L755.7,35.4 L758.3,33.5 L760.8,33.1 L763.4,31.4 L766.0,36.5 L768.5,36.4 L771.1,37.7 L773.7,37.5 L776.2,37.7 L778.8,38.1 L781.4,37.4 L783.9,36.7 L786.5,34.2 L789.0,32.7 L791.6,37.5 L794.2,38.3 L796.7,38.6 L799.3,39.1 L801.9,39.1 L804.4,39.1 L807.0,39.1 L809.6,39.1 L812.1,39.1 L814.7,39.1 L817.2,39.1 L819.8,39.1 L822.4,39.1 L824.9,39.1 L827.5,42.9 L830.1,41.7 L832.6,41.5 L835.2,43.6 L837.7,43.2 L840.3,45.2 L842.9,45.7 L845.4,45.7 L848.0,46.3" fill="none" stroke="#16324f" stroke-width="1.9"/><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#16324f" stop-opacity=".22"/><stop offset="100%" stop-color="#16324f" stop-opacity="0"/></linearGradient></defs></svg>
+<div style="font-size:11.5px;color:#7b8794;margin-top:6px">
+虚线为 1.0 净值线。前 7 个月基本走平（2-4 月连亏），8-9 月贡献了全部涨幅。</div></div>
+
+<div class="card"><h3 style="margin-top:0">月度</h3><svg viewBox="0 0 860 200" style="width:100%;height:auto"><line x1="40" y1="100.0" x2="848" y2="100.0" stroke="#cfd8dc"/><rect x="59.8" y="100.0" width="33.8" height="1.4" fill="#1e8449" rx="2"/><text x="76.7" y="114.4" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-0.5%</text><text x="76.7" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-01</text><rect x="133.3" y="100.0" width="33.8" height="6.4" fill="#1e8449" rx="2"/><text x="150.2" y="119.4" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-2.5%</text><text x="150.2" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-02</text><rect x="206.7" y="98.9" width="33.8" height="1.1" fill="#c0392b" rx="2"/><text x="223.6" y="92.9" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">+0.4%</text><text x="223.6" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-03</text><rect x="280.2" y="100.0" width="33.8" height="2.3" fill="#1e8449" rx="2"/><text x="297.1" y="115.3" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-0.9%</text><text x="297.1" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-04</text><rect x="353.7" y="91.4" width="33.8" height="8.6" fill="#c0392b" rx="2"/><text x="370.5" y="85.4" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">+3.3%</text><text x="370.5" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-05</text><rect x="427.1" y="100.0" width="33.8" height="5.7" fill="#1e8449" rx="2"/><text x="444.0" y="118.7" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-2.2%</text><text x="444.0" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-06</text><rect x="500.6" y="86.1" width="33.8" height="13.9" fill="#c0392b" rx="2"/><text x="517.5" y="80.1" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">+5.4%</text><text x="517.5" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-07</text><rect x="574.0" y="46.0" width="33.8" height="54.0" fill="#c0392b" rx="2"/><text x="590.9" y="40.0" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">+20.8%</text><text x="590.9" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-08</text><rect x="647.5" y="62.5" width="33.8" height="37.5" fill="#c0392b" rx="2"/><text x="664.4" y="56.5" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">+14.5%</text><text x="664.4" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-09</text><rect x="720.9" y="100.0" width="33.8" height="4.7" fill="#1e8449" rx="2"/><text x="737.8" y="117.7" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-1.8%</text><text x="737.8" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-10</text><rect x="794.4" y="100.0" width="33.8" height="3.8" fill="#1e8449" rx="2"/><text x="811.3" y="116.8" text-anchor="middle" font-size="9" font-weight="700" fill="#1e8449" stroke="#fff" stroke-width="2.6" style="paint-order:stroke">-1.5%</text><text x="811.3" y="190" text-anchor="middle" font-size="9.5" fill="#7b8794">26-11</text></svg></div>
+
+<h2>三、五个权重方案对比（合约口径 1.5×，2026）</h2>
+<div class="note">这一节的数字含做空、含杠杆，用来判断<b>权重怎么分</b>，不代表最终可执行的收益。
+最终可执行的是第四节的现货档。</div>
+<table>
+<tr><th>方案</th><th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th>
+<th class="r">单位回撤</th></tr>
+<tr><td>A 等权（现状）</td><td class="r">8,709 U</td><td class="r" style="color:#c0392b">+74.2%</td><td class="r" style="color:#1e8449">-15.4%</td><td class="r">4.80</td></tr><tr><td>B CRV6% + HYPE5%</td><td class="r">8,622 U</td><td class="r" style="color:#c0392b">+72.4%</td><td class="r" style="color:#1e8449">-17.1%</td><td class="r">4.23</td></tr><tr><td>C 只降 HYPE 到 5%</td><td class="r">8,502 U</td><td class="r" style="color:#c0392b">+70.0%</td><td class="r" style="color:#1e8449">-17.8%</td><td class="r">3.94</td></tr><tr><td>D 只降 CRV 到 6%</td><td class="r">8,832 U</td><td class="r" style="color:#c0392b">+76.6%</td><td class="r" style="color:#1e8449">-15.2%</td><td class="r">5.04</td></tr><tr><td>E 只降 CRV 到 7%</td><td class="r">8,801 U</td><td class="r" style="color:#c0392b">+76.0%</td><td class="r" style="color:#1e8449">-15.3%</td><td class="r">4.98</td></tr><tr class="hl"><td>F 最终（三主流11% / CRV7%） ★</td><td class="r">8,766 U</td><td class="r" style="color:#c0392b">+75.3%</td><td class="r" style="color:#1e8449">-15.2%</td><td class="r">4.96</td></tr>
+</table>
+<div class="ok"><b>结论：</b>降 HYPE 是双重变差（收益↓回撤↑）；降 CRV 是双重变好，但幅度在噪声内
+（+1.1pp 收益 / -0.2pp 回撤，317 天里完全可能是运气）。所以 CRV 的 7% 是按容量定的，
+不是按回测挑的 —— 回测只用来确认「没有明显损害」。</div>
+
+<h2>四、纯现货三档（无杠杆、无做空，2026）</h2>
+<table>
+<tr><th>档位</th><th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th>
+<th class="r">单位回撤</th></tr>
+<tr><td>现货满仓（底仓1.0，无加仓）</td><td class="r">7,472 U</td><td class="r" style="color:#c0392b">+49.4%</td><td class="r" style="color:#1e8449">-16.9%</td><td class="r">2.93</td></tr><tr class="hl"><td>现货常规（底仓.67+加仓.33） ★ 推荐</td><td class="r">6,878 U</td><td class="r" style="color:#c0392b">+37.6%</td><td class="r" style="color:#1e8449">-12.7%</td><td class="r">2.95</td></tr><tr><td>现货保守（底仓.33+加仓.17）</td><td class="r">5,903 U</td><td class="r" style="color:#c0392b">+18.1%</td><td class="r" style="color:#1e8449">-6.4%</td><td class="r">2.84</td></tr>
+</table>
+<h3>跨起点检验（现货常规档）</h3>
+<table>
+<tr><th>起点</th><th class="r">天数</th><th class="r">期末</th><th class="r">收益</th>
+<th class="r">回撤</th></tr>
+<tr><td><b>2025-01-01</b></td><td class="r">682</td><td class="r">6,283 U</td><td class="r" style="color:#c0392b">+25.7%</td><td class="r" style="color:#1e8449">-25.8%</td></tr><tr><td><b>2026-01-01</b></td><td class="r">317</td><td class="r">6,878 U</td><td class="r" style="color:#c0392b">+37.6%</td><td class="r" style="color:#1e8449">-12.7%</td></tr><tr><td><b>2026-07-01</b></td><td class="r">136</td><td class="r">7,055 U</td><td class="r" style="color:#c0392b">+41.1%</td><td class="r" style="color:#1e8449">-6.5%</td></tr>
+</table>
+<div class="warn"><b>注意 2026 和 2025 的差距。</b>2026 起是 +37.6% / -12.7%，
+2025 起是 +25.7% / <b>-25.8%</b>。别用 -12.7% 做心理预算 ——
+真实预算应该按 <b>-26%</b> 准备，也就是 5000 U 有可能先走到 3,700 U。</div>
+
+<h2>五、合约口径的起点 × 敞口矩阵（为什么选 1.0×）</h2>
+<table>
+<tr><th rowspan="2">起点</th><th colspan="3" class="c">1.5×</th>
+<th colspan="3" class="c">1.0×</th><th colspan="3" class="c">0.5×</th></tr>
+<tr><th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th>
+<th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th>
+<th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th></tr>
+<tr><td><b>2025-01-01</b></td><td class="r">7,342 U</td><td class="r" style="color:#c0392b">+46.8%</td><td class="r" style="color:#1e8449">-34.9%</td><td class="r">6,861 U</td><td class="r" style="color:#c0392b">+37.2%</td><td class="r" style="color:#1e8449">-23.1%</td><td class="r">6,034 U</td><td class="r" style="color:#c0392b">+20.7%</td><td class="r" style="color:#1e8449">-11.2%</td></tr><tr><td><b>2026-01-01</b></td><td class="r">8,766 U</td><td class="r" style="color:#c0392b">+75.3%</td><td class="r" style="color:#1e8449">-15.2%</td><td class="r">7,400 U</td><td class="r" style="color:#c0392b">+48.0%</td><td class="r" style="color:#1e8449">-10.2%</td><td class="r">6,134 U</td><td class="r" style="color:#c0392b">+22.7%</td><td class="r" style="color:#1e8449">-5.1%</td></tr><tr><td><b>2026-07-01</b></td><td class="r">8,765 U</td><td class="r" style="color:#c0392b">+75.3%</td><td class="r" style="color:#1e8449">-10.1%</td><td class="r">7,331 U</td><td class="r" style="color:#c0392b">+46.6%</td><td class="r" style="color:#1e8449">-6.6%</td><td class="r">6,076 U</td><td class="r" style="color:#c0392b">+21.5%</td><td class="r" style="color:#1e8449">-3.3%</td></tr>
+</table>
+<div class="note">回撤几乎严格线性（<code>回撤 ≈ 10.15% × 总名义</code>），收益略超线性 ——
+但只在 2026 年内成立。跨周期看，单位回撤收益随敞口上升而<b>下降</b>：
+2025 起 1.5× 是 1.34、1.0× 是 1.61、0.5× 是 1.85。这就是选 1.0× 的理由。</div>
+
+<h2>六、分币贡献（合约口径 1.5×）</h2>
+<table>
+<tr><th class="c">币</th><th class="r">权重</th><th class="r">起点</th><th class="r">期末</th>
+<th class="r">盈亏</th><th class="r">该币收益</th><th class="r">占总盈利</th></tr>
+<tr><td class="c"><b>UNI</b></td><td class="r">10%</td><td class="r">500</td><td class="r">1,978</td><td class="r" style="color:#c0392b">+1,478</td><td class="r">+295.6%</td><td class="r">39%</td></tr><tr><td class="c"><b>HYPE</b></td><td class="r">10%</td><td class="r">500</td><td class="r">1,243</td><td class="r" style="color:#c0392b">+743</td><td class="r">+148.7%</td><td class="r">20%</td></tr><tr><td class="c"><b>ETH</b></td><td class="r">11%</td><td class="r">550</td><td class="r">1,020</td><td class="r" style="color:#c0392b">+470</td><td class="r">+85.5%</td><td class="r">12%</td></tr><tr><td class="c"><b>BTC</b></td><td class="r">11%</td><td class="r">550</td><td class="r">898</td><td class="r" style="color:#c0392b">+348</td><td class="r">+63.3%</td><td class="r">9%</td></tr><tr><td class="c"><b>AAVE</b></td><td class="r">10%</td><td class="r">500</td><td class="r">767</td><td class="r" style="color:#c0392b">+267</td><td class="r">+53.4%</td><td class="r">7%</td></tr><tr><td class="c"><b>SOL</b></td><td class="r">11%</td><td class="r">550</td><td class="r">669</td><td class="r" style="color:#c0392b">+119</td><td class="r">+21.7%</td><td class="r">3%</td></tr><tr><td class="c"><b>XRP</b></td><td class="r">10%</td><td class="r">500</td><td class="r">627</td><td class="r" style="color:#c0392b">+127</td><td class="r">+25.5%</td><td class="r">3%</td></tr><tr><td class="c"><b>LINK</b></td><td class="r">10%</td><td class="r">500</td><td class="r">589</td><td class="r" style="color:#c0392b">+89</td><td class="r">+17.9%</td><td class="r">2%</td></tr><tr><td class="c"><b>BNB</b></td><td class="r">10%</td><td class="r">500</td><td class="r">557</td><td class="r" style="color:#c0392b">+57</td><td class="r">+11.5%</td><td class="r">2%</td></tr><tr><td class="c"><b>CRV</b></td><td class="r">7%</td><td class="r">350</td><td class="r">416</td><td class="r" style="color:#c0392b">+66</td><td class="r">+19.0%</td><td class="r">2%</td></tr>
+</table>
+<div class="note">UNI 一个品种占总盈利 39%、HYPE 占 20%，两者合计 59%。
+这是<b>集中度风险</b>，不是可复制的收益来源。UNI 那 +295.6% 来自一笔
+8/21 在 3.821 做多、持有 120 根 4H、9/10 在 6.080 出场的交易（单笔 +15.7R）。
+这种单子一年可能就一两笔。</div>
+
+<h2>七、CRV 权重扫描（证明这条证据不能用）</h2>
+<table>
+<tr><th class="r">CRV 权重</th><th class="r">期末</th><th class="r">收益</th><th class="r">回撤</th></tr>
+<tr><td class="r">10%</td><td class="r">8,709 U</td><td class="r" style="color:#c0392b">+74.2%</td><td class="r" style="color:#1e8449">-15.4%</td></tr><tr><td class="r">8%</td><td class="r">8,770 U</td><td class="r" style="color:#c0392b">+75.4%</td><td class="r" style="color:#1e8449">-15.3%</td></tr><tr><td class="r">6%</td><td class="r">8,832 U</td><td class="r" style="color:#c0392b">+76.6%</td><td class="r" style="color:#1e8449">-15.2%</td></tr><tr><td class="r">4%</td><td class="r">8,893 U</td><td class="r" style="color:#c0392b">+77.9%</td><td class="r" style="color:#1e8449">-15.1%</td></tr><tr><td class="r">2%</td><td class="r">8,954 U</td><td class="r" style="color:#c0392b">+79.1%</td><td class="r" style="color:#1e8449">-15.0%</td></tr><tr><td class="r">0%</td><td class="r">9,016 U</td><td class="r" style="color:#c0392b">+80.3%</td><td class="r" style="color:#1e8449">-14.9%</td></tr>
+</table>
+<div class="note">如果是结构性原因，曲线应该在某个点出现拐点或平台。
+这里一路单调到底、权重 0（彻底剔除）最好 —— 这只能说明「2026 年 CRV 是最差的品种」，
+不能说明「CRV 权重应该更低」。任何单一年份挑掉当年最差的品种都会让回测变好。</div>
+
+<h2>八、执行规则</h2>
+<table>
+<tr><th style="width:130px">环节</th><th>规则</th></tr>
+<tr><td><b>底仓</b></td><td>日线状态 UP / RANGE 时持有 67% 额度；DOWN 时清仓到 0（现货不做空）</td></tr>
+<tr><td><b>加仓</b></td><td>4H 收盘突破前 20 根极值 → 上到 100% 额度；ATR 滚动分位 &gt;85% 时拦截</td></tr>
+<tr><td><b>止损</b></td><td>1.5×ATR(14) 硬止损；状态翻转主出场；满 120 根 4H 兜底</td></tr>
+<tr><td><b>拆单</b></td><td>仅 CRV 需要拆 2 笔（其余 9 个币 1 笔即可）。用限价单，1 小时内完成</td></tr>
+<tr><td><b>再平衡</b></td><td>不每日再平衡。固定份额、权重随盈亏自然漂移 —— 回测里两者差 +42 U，不值得付调仓成本</td></tr>
+<tr><td><b>回撤应对</b></td><td>回撤触及 -15% 时把峰值敞口降到 0.7×，<b>不收紧止损、不改阈值</b></td></tr>
+</table>
+
+<div class="warn"><b>当前实盘有一个冲突（2026-11-13 实测）。</b>
+10 个品种里有 9 个处于日线 DOWN、且持有<b>空头</b>仓位（BTC +5.44R、XRP +4.59R 等）。
+这套现货配置不含做空，所以它们的建议持仓金额都是 <b>0 U</b>。
+如果这些仓在你账上是合约空单，要么按规则平掉，要么单独走合约账户管，
+不要混进这 5000 U 的现货账里 —— 否则回撤预算会失效。</div>
+
+<div class="foot">
+回测脚本 <code>_bt_5000.py</code> · 配置真源 <code>portfolio_config.py</code> ·
+实盘信号 <code>live_signals.py</code>（已接入，输出 <code>target</code> 字段）<br>
+口径：0.04% 单边手续费 · 3bp/日资金费 · 每日等权再平衡仅在对照中使用 ·
+所有 K 线均为已收盘 bar（无未来函数）
+</div>
+</div></body></html>

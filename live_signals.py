@@ -34,6 +34,7 @@ from test_regime_fit import agg4h
 from _proto_4h import atr_wilder
 from strategy_1h_rsi import regime_series, align_regime_safe
 import bt_skeleton as BT
+import portfolio_config as PC
 
 COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "CRV", "UNI", "AAVE"]
 SECTOR = {"BTC": "储值", "ETH": "L1", "SOL": "L1", "BNB": "交易所", "XRP": "支付",
@@ -186,6 +187,20 @@ def analyze(c, now):
             o["action"] = "空仓"
             o["note"] = (f"需{'涨' if o['want']>0 else '跌'} {o['need']:.2f}% 才触发"
                          if o["need"] is not None else "无方向")
+
+    # ---- 按 portfolio_config 折算建议持仓金额 ----
+    # 持仓中一律按满峰值算（已经在场，没有"只建一半"的问题）；
+    # 空仓时才区分「只底仓」与「已触发上满峰值」。
+    at_peak = bool(holding) or bool(o.get("triggered"))
+    tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak)
+    # 现货配置不做空：若当前是空头持仓，目标金额必然是 0，得说清楚不是算错了
+    if holding and holding["side"] < 0 and tgt == 0:
+        why = "空头持仓｜现货配置不含做空，此仓应平掉（要做空请单独走合约账户）"
+        o["spot_conflict"] = True
+    o["target"] = round(tgt)
+    o["target_note"] = why
+    o["cap_flag"] = PC.cap_check(tgt, c)[1]
+    o["slices"] = PC.orders_needed(tgt, c)
     return o
 
 
@@ -195,7 +210,9 @@ def main():
     for c in COINS:
         try:
             rows.append(analyze(c, now))
-            print(f"  {c:<5} {rows[-1]['state']:<6} {rows[-1]['action']:<8} {rows[-1]['note']}")
+            r = rows[-1]
+            print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}"
+                  f"{r['target']:>7,.0f} U  {r['note']}")
         except Exception as e:
             errs.append({"c": c, "err": f"{type(e).__name__}: {e}"})
             print(f"  {c:<5} 失败 {errs[-1]['err']}")
@@ -205,12 +222,13 @@ def main():
     bar = max((o["bar"] for o in rows), default=None)
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
-           "bar4h": bar,
+           "bar4h": bar, "capital": PC.CAPITAL,
            "coins": rows, "urgent": [o["c"] for o in urgent], "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)
 
-    print(f"\n数据截止 4H：{pay['bar4h']}   生成于 {pay['asof']}")
+    print(f"\n数据截止 4H：{pay['bar4h']}   生成于 {pay['asof']}"
+          f"   资金基准：{PC.CAPITAL:,.0f} U")
     print(f"需要动作：{len(urgent)} 个" + (("  → " + " ".join(pay['urgent'])) if urgent else "（全部无需动作）"))
     if errs:
         print(f"取数失败 {len(errs)} 个：{[e['c'] for e in errs]}")
