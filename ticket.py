@@ -25,6 +25,7 @@ TTL 的取值依据是 _diag_delay.py 的实测：开仓信号每延迟 4 小时
     python ticket.py done 3 80255.5  # 标记 3 号已执行，记下成交价
     python ticket.py done all        # 全部标记已执行
     python ticket.py drop 3          # 明确放弃 3 号
+    python ticket.py stats           # 实测「建单到结算」的延迟分布 + 折算 R 损失
 """
 import datetime as dt
 import html
@@ -332,6 +333,148 @@ def render():
     return head
 
 
+# 开仓信号「延迟 d 根 4H」的总 R 衰减（_diag_delay.py 实测，1449 笔，无偏口径）
+# 注意：这张表只对**开仓**成立。平仓/底仓没做过延迟实验，不套用。
+DELAY_CURVE = [(0, 0.0), (1, -7.8), (2, -12.1), (3, -21.7),
+               (6, -33.8), (12, -51.3), (18, -59.3), (24, -58.3)]
+KIND_GROUP = {"开仓": "开仓", "平仓": "平仓类", "止损临近": "平仓类", "即将到期": "平仓类",
+              "清底仓": "底仓类", "建底仓": "底仓类"}
+
+
+def _delay_cost(bars):
+    """延迟该根数对应的总 R 衰减（%）。线性插值到实测曲线上。"""
+    if bars <= 0:
+        return 0.0
+    if bars >= DELAY_CURVE[-1][0]:
+        return DELAY_CURVE[-1][1]
+    for (b0, c0), (b1, c1) in zip(DELAY_CURVE, DELAY_CURVE[1:]):
+        if b0 <= bars <= b1:
+            t = (bars - b0) / (b1 - b0)
+            return c0 + t * (c1 - c0)
+    return 0.0
+
+
+def _parse_utc(s):
+    if not s:
+        return None
+    try:
+        return dt.datetime.strptime(s.replace("UTC", "").strip()[:16],
+                                     BAR_FMT).replace(tzinfo=dt.timezone.utc)
+    except Exception:
+        return None
+
+
+def _pct(xs, q):
+    """线性插值分位数（样本少时比 numpy 那套更稳）。"""
+    if not xs:
+        return None
+    s = sorted(xs)
+    k = (len(s) - 1) * q
+    lo, hi = int(k), min(int(k) + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (k - lo)
+
+
+def cmd_stats():
+    """实测「建单 → 结算」的延迟，并用它反推真实的调仓节奏。
+
+    这是把「每天看三次邮件够不够」从假设变成实测的唯一办法：
+    第一版设计里 −7.8%/4h 的衰减是回测算的，你实际多少小时才动手只有台账知道。
+    """
+    d = load()
+    items = d["items"]
+    if not items:
+        print("台账还空着。跑两三周、攒到十几张已结算工单再看。")
+        return 0
+
+    n = {"done": 0, "drop": 0, "void": 0, "open": 0}
+    for i in items:
+        n[i["status"]] = n.get(i["status"], 0) + 1
+    tot = len(items)
+    print(f"台账共 {tot} 张：已执行 {n['done']} · 放弃 {n['drop']} · "
+          f"自动作废 {n['void']} · 仍挂起 {n['open']}")
+    if tot:
+        print(f"  作废率 {n['void'] / tot * 100:.0f}%（行情自己走掉了，本来就不用做）")
+        print(f"  放弃率 {n['drop'] / tot * 100:.0f}%（看到了但决定不做）")
+
+    # ---- 延迟分布：只看真的执行了的 ----
+    lag_h, lag_by = [], {}
+    for i in items:
+        if i["status"] != "done":
+            continue
+        t0, t1 = _parse_utc(i["bar"]), _parse_utc(i["settled_at"])
+        if not t0 or not t1:
+            continue
+        h = max(0.0, (t1 - t0).total_seconds() / 3600)
+        lag_h.append(h)
+        lag_by.setdefault(KIND_GROUP.get(i["kind"], "其他"), []).append(h)
+
+    print("\n" + "-" * 74)
+    if len(lag_h) < 5:
+        print(f"已执行工单只有 {len(lag_h)} 张，延迟分布还看不出形状。")
+        print("先按「早 8:30 / 午 13:00 / 晚 21:00」看三次跑两三周，再回来看这张表。")
+        print("-" * 74)
+        _void_reasons(items)
+        return 0
+
+    print(f"建单 → 结算的实测延迟（{len(lag_h)} 张已执行，起点=信号那根 4H 收盘）")
+    print("-" * 74)
+    print(f"{'口径':<10}{'小时':>9}{'折成 4H 根数':>14}")
+    print("-" * 74)
+    for lab, q in [("中位 P50", 0.5), ("均值", None), ("P25", 0.25),
+                   ("P75", 0.75), ("P90", 0.90), ("最长", 1.0)]:
+        v = (sum(lag_h) / len(lag_h)) if q is None else _pct(lag_h, q)
+        print(f"{lab:<10}{v:>9.1f}{v / 4:>14.1f}")
+
+    print("\n按动作类型分开看（开仓时效最硬，底仓最松）")
+    print("-" * 74)
+    print(f"{'类型':<10}{'笔数':>6}{'中位h':>9}{'P75h':>9}{'最长h':>9}")
+    print("-" * 74)
+    for g in ("开仓", "平仓类", "底仓类", "其他"):
+        xs = lag_by.get(g)
+        if not xs:
+            continue
+        print(f"{g:<10}{len(xs):>6}{_pct(xs, 0.5):>9.1f}"
+              f"{_pct(xs, 0.75):>9.1f}{max(xs):>9.1f}")
+
+    # ---- 折算成钱 ----
+    opens = lag_by.get("开仓") or []
+    print("\n折算成收益（只对开仓有意义，曲线来自 _diag_delay.py 的 1449 笔实测）")
+    print("-" * 74)
+    if opens:
+        med_bars = _pct(opens, 0.5) / 4
+        p75_bars = _pct(opens, 0.75) / 4
+        print(f"  开仓中位延迟 {med_bars:.1f} 根 4H → 总 R {_delay_cost(med_bars):+.1f}%")
+        print(f"  开仓 P75 延迟 {p75_bars:.1f} 根 4H → 总 R {_delay_cost(p75_bars):+.1f}%")
+        bad = [h for h in opens if h > 24]
+        if bad:
+            print(f"  {len(bad)} 笔开仓超过 24h（{len(bad) / len(opens) * 100:.0f}%），"
+                  f"这部分已越过 TTL，市场多半走掉了")
+    else:
+        print("  还没有已执行的开仓单，无法折算。")
+    # 参照值直接从同一条曲线算，避免手写常量与实测曲线漂移
+    print(f"  参照：每天看 3 次 ≈ 中位 6h（{_delay_cost(1.5):+.0f}%）；"
+          f"只看 1 次 ≈ 中位 12h（{_delay_cost(3):+.0f}%）；"
+          f"隔天才看 ≈ 24h（{_delay_cost(6):+.0f}%）")
+
+    _void_reasons(items)
+    return 0
+
+
+def _void_reasons(items):
+    vs = [i for i in items if i["status"] == "void" and i.get("void_note")]
+    if not vs:
+        return
+    print("\n自动作废的原因分布（= 系统替你省掉的无效动作）")
+    print("-" * 74)
+    cnt = {}
+    for i in vs:
+        k = ("日线翻回来了" if "日线" in i["void_note"] else
+             ("行情走掉了" if "行情已变化" in i["void_note"] else i["void_note"]))
+        cnt[k] = cnt.get(k, 0) + 1
+    for k, v in sorted(cnt.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:<20}{v:>4} 张（{v / len(vs) * 100:.0f}%）")
+
+
 def main():
     argv = sys.argv[1:]
     if not argv:
@@ -342,6 +485,8 @@ def main():
         r = sync()
         print(f"开新单 {r['opened']} 张、作废 {r['voided']} 张，当前未结算 {r['open']} 张")
         return 0
+    if cmd == "stats":
+        return cmd_stats()
     if cmd == "list":
         d = load()
         op = _open_items(d)
