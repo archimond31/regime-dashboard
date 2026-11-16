@@ -304,6 +304,16 @@ def render():
                (f"挂 {i['age_bars'] // 6} 天 {i['age_bars'] % 6 * 4}h" if i["age_bars"] >= 6
                 else f"挂 {i['age_bars'] * 4}h"))
         age_col = "#d32f2f" if ex else "#757575"
+        # 过期只说明「超了」，不说明「还剩多少」。剩多久更有用 ——
+        # 开仓 TTL 只有 24h，看到「剩 8h」才知道下班前得处理掉。
+        ttl = TTL.get(i["kind"])
+        left_h = (ttl - i["age_bars"]) * 4 if ttl else None
+        if ex:
+            age_sub = f'<div style="font-size:11px;color:#d32f2f;margin-top:2px">已超时 {-left_h}h</div>'
+        elif left_h is not None and left_h <= 24:
+            age_sub = f'<div style="font-size:11px;color:#ef6c00;margin-top:2px">剩 {left_h}h</div>'
+        else:
+            age_sub = ""
         sgn = "买入" if i["side"] > 0 else "卖出"
         px = i["ref_px"]
         pxs = (f"{px:,.4f}" if px is not None and abs(px) < 10
@@ -327,7 +337,7 @@ def render():
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;text-align:right;'
             f'color:#757575;white-space:nowrap">{stps}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:12px;text-align:right;'
-            f'color:{age_col};white-space:nowrap">{age}{"<br>已过期" if ex else ""}</td></tr>')
+            f'color:{age_col};white-space:nowrap">{age}{age_sub}</td></tr>')
 
     cmd = ""
     for i in op[:4]:
@@ -344,7 +354,7 @@ def render():
             f'<table style="width:100%;border-collapse:collapse">'
             f'<tr style="background:#fafafa">'
             + "".join(f'<th style="padding:6px 8px;text-align:{al};font-size:11px;'
-                      f'color:#757575;font-weight:500">{h}</th>'
+                      f'color:#757575;font-weight:500;white-space:nowrap">{h}</th>'
                       for h, al in zip(heads, hali))
             + f'</tr>{rows}</table>'
             f'<div style="padding:10px 12px;font-size:12px;color:#5d4037;line-height:1.9;'
