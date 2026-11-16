@@ -96,6 +96,10 @@ def main():
 
     if not step("① 拉数据 + 算信号", ["live_signals.py"]):
         return 1
+    # 工单同步放在渲染之前：gen_signal_html 和 notify_mail 都要读 _tickets.json，
+    # 顺序反了就会读到上一轮的状态（比如刚触发的动作在工单区里还不存在）。
+    # 非致命：工单层挂了不该阻断信号本身。
+    step("①b 同步执行工单", ["ticket.py", "sync"], fatal=False)
     if not step("② 渲染 HTML", ["gen_signal_html.py"]):
         return 1
     if not no_mail:

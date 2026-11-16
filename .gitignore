@@ -163,3 +163,10 @@ deploy/heartbeat.url
 !_cap_futures.py
 _fills.jsonl
 _cap_fut.json
+
+# 执行工单台账（脚本入库；未结算工单是本机状态，不入库）
+!ticket.py
+_tickets.json
+# 频率与延迟成本诊断（结论快照，随仓库发布）
+!_diag_freq.py
+!_diag_delay.py

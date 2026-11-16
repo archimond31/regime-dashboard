@@ -11,6 +11,8 @@ import json
 import os
 import datetime as _dt
 
+import ticket as TK      # 工单台账：把「本轮动作」升级成「跨轮可结算的待办」
+
 SRC = "_signal.json"
 OUT = "signal_now.html"
 
@@ -52,27 +54,22 @@ def state_color(s):
 
 
 # ---------- 动作区 ----------
-if urgent:
-    act_rows = ""
-    for o in urgent:
-        c = {"开仓": UP, "平仓": DN, "清底仓": "#d84315", "建底仓": "#1565c0",
-             "止损临近": "#ef6c00", "即将到期": "#6a1b9a"}[o["action"]]
-        act_rows += (
-            f'<tr><td style="padding:8px 10px;border-bottom:1px solid #f0d9d9;font-size:13px">'
-            f'<b style="color:{c}">{o["action"]}</b></td>'
-            f'<td style="padding:8px 10px;border-bottom:1px solid #f0d9d9;font-size:13px"><b>{o["c"]}</b></td>'
-            f'<td style="padding:8px 10px;border-bottom:1px solid #f0d9d9;font-size:13px;color:{TX}">{o["note"]}</td></tr>')
+# 原来这里是「本次需要动作」的一次性列表：每一轮重新生成，上一轮没做的动作就此消失。
+# 手动执行最怕的正是这个 —— 看到了、以为做了、实际没做，而系统下一轮就不提了。
+# 换成 ticket.py 维护的跨轮工单：有编号、有年龄、有 TTL，直到显式结算才离开视野。
+ticket_block = TK.render()
+
+# 本轮新触发的动作单独摘一行 —— 工单区只说「还欠哪些」，不说「刚刚多了哪些」
+_new_now = (TK.load().get("last") or {}).get("bar") == d.get("bar4h")
+if urgent and _new_now:
+    names = "、".join(f'{o["c"]} {o["action"]}' for o in urgent)
     action_block = (
-        f'<div style="border:2px solid {UP};border-radius:8px;margin:18px 0;background:#fff5f5">'
-        f'<div style="padding:10px 12px;background:{UP};color:#fff;font-size:13px;font-weight:600;'
-        f'border-radius:6px 6px 0 0">本次需要动作（{len(urgent)} 个）</div>'
-        f'<table style="width:100%;border-collapse:collapse">{act_rows}</table></div>')
+        f'<div style="border-left:4px solid {UP};background:#fff5f5;border-radius:6px;'
+        f'padding:10px 12px;margin:14px 0;font-size:13px;color:{TX}">'
+        f'<b>本轮新触发 {len(urgent)} 个动作：</b>{names}'
+        f'　（已进下方工单，执行完记得标记）</div>')
 else:
-    action_block = (
-        f'<div style="border:1px solid #c8e6c9;background:#f1f8f4;border-radius:8px;padding:12px 14px;'
-        f'margin:18px 0;font-size:13px;color:#1b5e20">'
-        f'<b>本轮无需任何动作。</b>10 个品种的日线状态与持仓均保持原状，'
-        f'没有触发开仓、平仓或止损。</div>')
+    action_block = ""
 
 # ---------- 持仓表 ----------
 if holds:
@@ -165,8 +162,11 @@ all_block = (
 # ---------- 顶部 KPI ----------
 nearest = min((o for o in COINS if not o["pos"] and o.get("need") is not None),
               key=lambda o: abs(o["need"]), default=None)
+# KPI 里的「待执行」用跨轮工单数，不用本轮的 urgent ——
+# 本轮的 urgent 每 4 小时清零，读它会让人以为「没有欠账」。
+_open_n = sum(1 for i in TK.load()["items"] if i["status"] == "open")
 kpis = [("持仓", f"{len(holds)} / {len(COINS)}", TX),
-        ("需动作", f"{len(urgent)}", UP if urgent else TX),
+        ("待执行工单", f"{_open_n} 张", UP if _open_n else TX),
         ("闸门拦截", f"{len(blocked)}", "#ef6c00" if blocked else TX),
         ("最接近触发", f'{nearest["c"]} {abs(nearest["need"]):.2f}%' if nearest else "—", TX)]
 kpi_html = "".join(
@@ -224,6 +224,7 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 {err_block}
 {stale_block}
 {action_block}
+{ticket_block}
 {hold_block}
 {all_block}
 
