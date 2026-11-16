@@ -157,3 +157,9 @@ deploy/heartbeat.url
 # 翻空到建空的间隔诊断（结论快照，随仓库发布）
 !_diag_flip_gap.py
 !_diag_flip_gap2.py
+
+# 滑点实测台账工具（脚本入库；台账本身是本机数据，不入库）
+!fill_log.py
+!_cap_futures.py
+_fills.jsonl
+_cap_fut.json
