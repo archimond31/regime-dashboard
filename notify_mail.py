@@ -174,13 +174,13 @@ def main():
 
     tk = TK.load()
     op = [i for i in tk["items"] if i["status"] == "open"]
-    last = tk.get("last") or {}
-    new_ids = set(last.get("opened") or [])
-    new_items = [i for i in op if i["id"] in new_ids]
+    # 「新动作」以单子上的 notified 标记为准，不看 sync 覆盖的 last.opened ——
+    # 否则某次没发出去（额度已用 / SMTP 失败 / 进程崩）这条提醒就永久丢了。
+    new_items = TK.unnotified(tk)
     exp = [i for i in op if TK.expired(i)]
 
     st = _read_state()
-    key = _sig_key(sig, new_ids)
+    key = _sig_key(sig, [i["id"] for i in new_items])
     dup = st.get("sig") == key
     # 「今天已经有过一封信」—— 不是「今天发过巡检信」。任何一封都算，
     # 因为它们正文都是同一份持仓表，多收一封并不增加信息量。
@@ -241,7 +241,7 @@ def main():
         VERD = {"patrol": "巡检信：证明链路活着，无新动作时每天保底一封",
                 "fault": f"故障信：{len(errs)} 个品种取数失败",
                 "remind": f"催办信：{len(exp)} 单过期未结算（冷却 {REMIND_GAP_H}h 已过）",
-                "action": f"执行信：本轮新开 {len(new_items)} 张工单"}
+                "action": f"执行信：{len(new_items)} 张工单还没通知过"}
         print(f"[dry] 配置来自 {cfg['_src']}，收件人 {', '.join(cfg['to'])}")
         print(f"[dry] 今天（北京 {_today_bj()}）已有信：{'是' if sent_today else '否'}")
         print(f"[dry] 未结算工单 {len(op)} 张，其中过期 {len(exp)} 张")
@@ -268,6 +268,9 @@ def main():
     if mode == "remind":
         st["last_remind_at"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
     _write_state(st)
+    # 只有真发成功才标记「已通知过」。发失败不标，下一班还会再提。
+    if mode == "action":
+        TK.mark_notified([i["id"] for i in new_items])
     print(f"[已发送·{mode}] {subj} → {', '.join(cfg['to'])}")
 
 

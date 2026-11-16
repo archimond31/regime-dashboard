@@ -150,6 +150,10 @@ def new_item(o, bar):
         "settled_at": None,
         "fill_px": None,
         "void_note": None,
+        # 「这单通知过没有」必须记在单子上，不能记在全局的 last.opened 里 ——
+        # 那个字段每次 sync 都被覆盖，一旦某次没发出去（当天额度已用、SMTP 失败、
+        # 进程崩溃），这条提醒就永久丢了，而单子还挂在列表里没人知道。
+        "notified": False,
     }
 
 
@@ -260,6 +264,26 @@ def mark(ids, status, fill_px=None):
 def expired(i):
     t = TTL.get(i["kind"])
     return bool(t and i["age_bars"] > t)
+
+
+def unnotified(d=None):
+    """还没通知过你的工单。老台账里没有这个字段 → 视为未通知，宁可多发一次。"""
+    d = d or load()
+    return [i for i in d["items"] if i["status"] == "open" and not i.get("notified")]
+
+
+def mark_notified(ids):
+    """发信成功后调用。只标记真正发出去的那几张。"""
+    d = load()
+    want = set(ids)
+    hit = 0
+    for i in d["items"]:
+        if i["id"] in want and not i.get("notified"):
+            i["notified"] = True
+            hit += 1
+    if hit:
+        save(d)
+    return hit
 
 
 def render():
