@@ -26,7 +26,6 @@ daily_regime_alert.py —— 日线市场状态（趋势）判断 + 每日邮件
   S5  背离失败检测：背离后价格突破背离摆动极值价连续 2 日 → 背离失败，回 RANGE
 仅用 Python 标准库，无第三方依赖。
 """
-import bisect
 import json
 import os
 import sys
@@ -314,14 +313,20 @@ def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
 
     与可视化脚本同源：调用 daily_states（ob=70 / os=30 / 背离 / 两日确认 /
     反向穿越纠错 / 背离失败检测），提取最后状态、最近一次触发原因与持续天数。
-    ma_slow/ma_fast：日线 120/60；周线传 WEEKLY_MA_SLOW/FAST（24/12，÷5 机械映射）。"""
-    start = start or START
-    s0 = bisect.bisect_left(dates, start)
+    ma_slow/ma_fast：日线 120/60；周线传 WEEKLY_MA_SLOW/FAST（24/12，÷5 机械映射）。
+
+    **判定起点 = 「数据累计够 ma_slow 根」那一刻，不是展示窗口起点（start）。**
+    曾经写成 s0 = bisect(dates, start)（=2024-01-01），结果是每个有前史的品种
+    都在 2024-01-01 被凭空塞一个 entry_reason="init" 的初始状态，而 init 血统
+    既不受 MA60 纠错、也不受背离失败约束 —— 等于给 21 个品种各开了一个不受监督的
+    假起点（WTI 原油「初始化」挂了 319 天就是这么来的，不是数据不够，是起点被截断）。
+    交易层（strategy_1h_rsi.regime_and_blood / bt_skeleton.blood_of）一直用
+    start_idx = ma_slow，这里现在与之一致：同一套状态机、同一个起点。
+    只有「上线不满 ma_slow 根」的品种（HYPE）才真正需要从数据首根起算。
+    """
+    _ = start or START   # 保留形参：展示窗口的裁剪在 build()/页面层做，不在这里
     last = len(closes) - 1
-    if s0 < ma_slow:
-        # 短历史品种（如 HYPE，2024-12 才 TGE）：不足以在 start 前热身满慢线，
-        # 退化为「数据起点 + 慢线长度」作为动态判定起点
-        s0 = ma_slow
+    s0 = ma_slow
     if s0 >= len(closes):
         return {"state": "N/A", "reason": "insufficient_data",
                 "as_of": dates[last] if dates else ""}
