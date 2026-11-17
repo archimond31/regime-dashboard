@@ -35,6 +35,7 @@ from _proto_4h import atr_wilder
 from strategy_1h_rsi import regime_series, regime_and_blood, align_regime_safe
 import bt_skeleton as BT
 import portfolio_config as PC
+import vol_target as VT
 
 # 状态血统的中文标签。血统决定这段状态能不能被纠错：
 #   init_ma120 —— 状态机刚预热完的初始猜测，既不受 MA60 纠错、也不受背离失败约束，
@@ -232,10 +233,22 @@ def analyze(c, now):
     # 日线已翻转的仓不反手，先归零 —— 反手要等下一根 4H 的突破确认。
     at_peak = bool(holding) or bool(o.get("triggered"))
     closing = bool(holding and holding.get("flipped"))
-    tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing)
+
+    # 波动目标化：σ 用**已收盘**的 4H 序列算（load_coin 已剔除未收盘 bar），
+    # 系数每 7 天由日历桶刷新一次，无状态、可复现。
+    # scale 是最终乘数（系数 × κ），作用在金额上，正负号不变。
+    cf, sg = VT.coef_now(b4)
+    scale = cf * VT.KAPPA if VT.ENABLED else 1.0
+    o["vt"] = dict(on=VT.ENABLED, lb=VT.LB, sigma=sg, coef=cf,
+                   kappa=VT.KAPPA, scale=scale)
+
+    tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing,
+                         scale=scale)
     # 被闸门拦住时 target 恒为 0，但原因不是「没跌破」，得说清楚
     if o.get("gate_blocked") and tgt == 0 and not holding:
         why = f"波动闸门拦截（分位 {pctv * 100:.0f}% > {VOL_Q * 100:.0f}%）→ 不开新仓"
+    if VT.ENABLED:
+        why = f"{why}｜{VT.describe(cf, sg)}"
     o["target"] = round(tgt)
     o["side"] = "多" if tgt > 0 else ("空" if tgt < 0 else "—")
     o["target_note"] = why
@@ -291,7 +304,9 @@ def main():
         if not rs:
             continue
         st = o["state"]
-        amt = round(PC.CAPITAL * PC.WEIGHTS.get(o["c"], 0.0) * PC.BASE_RATIO)
+        # 底仓金额必须和 target() 用同一个 scale，否则提示的 U 数会和表里不一致
+        amt = round(PC.CAPITAL * PC.WEIGHTS.get(o["c"], 0.0) * PC.BASE_RATIO
+                    * (o.get("vt") or {}).get("scale", 1.0))
         if st == "DOWN":
             act = "清底仓"
             tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")
@@ -324,6 +339,10 @@ def main():
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
            "bar4h": bar, "capital": PC.CAPITAL, "allow_short": PC.ALLOW_SHORT,
+           # 生效配置留痕：三个月后回看「当时到底开没开」不用翻代码
+           "vt": {"on": VT.ENABLED, "lb": VT.LB, "target": VT.TARGET,
+                  "lo": VT.LO, "hi": VT.HI, "kappa": VT.KAPPA,
+                  "rebal": VT.REBAL_DAYS},
            "coins": rows, "urgent": [o["c"] for o in urgent], "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)

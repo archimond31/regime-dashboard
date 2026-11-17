@@ -286,6 +286,20 @@ def mark_notified(ids):
     return hit
 
 
+def _cur_targets():
+    """当前 _signal.json 里各币的建议名义 —— 用来发现「工单金额已过时」。
+
+    波动目标化（vol_target）每 7 天会重新算一次系数，同一张工单挂上一天，
+    金额就可能和最新信号不一样了。不提示的话，人会照着旧数字下单。
+    """
+    try:
+        with open(SIG, encoding="utf-8") as f:
+            d = json.load(f)
+        return {o["c"]: o.get("target") for o in d.get("coins", [])}
+    except Exception:
+        return {}
+
+
 def render():
     """给邮件正文用的工单区 HTML（内联样式 + table，和 gen_signal_html 同规矩）。"""
     d = load()
@@ -294,6 +308,7 @@ def render():
         return ('<div style="border:1px solid #c8e6c9;background:#f1f8f4;border-radius:8px;'
                 'padding:12px 14px;margin:18px 0;font-size:13px;color:#1b5e20">'
                 '<b>没有待执行工单。</b>上一批动作都已结算。</div>')
+    CUR = _cur_targets()
 
     rows = ""
     for i in op:
@@ -315,6 +330,14 @@ def render():
         else:
             age_sub = ""
         sgn = "买入" if i["side"] > 0 else "卖出"
+        # 只对「建仓类」工单比对当前信号：平仓/清底仓的 notional 是「要平掉的量」，
+        # 和当前建议名义本来就不是一个东西，比了会误导。
+        cur = CUR.get(i["coin"])
+        drift = ""
+        if (i["kind"] in ("开仓", "建底仓") and cur is not None and i["notional"]
+                and abs(cur - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
+            drift = (f'<div style="font-size:11px;color:#ef6c00;margin-top:2px">'
+                     f'现信号 {cur:,.0f} U（波动系数已变）</div>')
         px = i["ref_px"]
         pxs = (f"{px:,.4f}" if px is not None and abs(px) < 10
                else (f"{px:,.2f}" if px is not None else "—"))
@@ -329,7 +352,7 @@ def render():
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;color:#9e9e9e">#{i["id"]}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:14px"><b>{i["coin"]}</b></td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;color:{c};font-weight:600">'
-            f'{sgn} {i["notional"]:,.0f} U</td>'
+            f'{sgn} {i["notional"]:,.0f} U{drift}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px">'
             f'<span style="color:{c}">{html.escape(LAB.get(i["kind"], i["kind"]))}</span>{note}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;text-align:right;'

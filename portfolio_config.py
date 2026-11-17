@@ -23,6 +23,13 @@
   HYPE 保持 10% —— 曾按「样本短 + 状态机失效」降到 5%，回测显示收益 -4.2pp、
   回撤反而 -2.4pp（-15.4% → -17.8%）。它与 AAVE 的相关性只有 0.06，是组合里的减震器。
 
+== 波动目标化（2026-11-17 起，默认开）==
+  上面的权重是「钱的分配」，还不等于「风险的分配」：CRV 年化波动 92~110%、
+  BTC 41~58%，同样 10% 的钱，风险差 2 倍。target() 多一个 scale 参数，
+  由 vol_target.py 按 1/σ 给出（已含 κ，平均总敞口保持 0.686× 不变）。
+  **只缩金额、不改方向**：高波动时底仓、加仓层、空头一起缩。
+  关闭：环境变量 SKEL_VT=0。评估过程见 05_波动目标化_VT60.md。
+
 回测与全部敏感性检验见 _bt_5000.py（产物 _bt_5000.html）。
 """
 import math
@@ -60,18 +67,20 @@ MIN_NOTIONAL = 5.0
 MIN_POSITION = 50.0
 
 
-def target(capital, coin, state, adding=False, closing=False):
+def target(capital, coin, state, adding=False, closing=False, scale=1.0):
     """该币当前应持有的**名义金额**（USDT，负数=空头），以及一句人话说明。
 
     state:   "UP" / "RANGE" / "DOWN"（日线 G 状态机）
     adding:  4H 已突破前 20 根极值，可以上到峰值
     closing: 日线已翻转、与原仓位方向相反 —— 此时目标是 0（先平，不反手）
+    scale:   波动目标化系数（vol_target.py 给出，含 κ）。1.0 = 不缩放。
+             只缩金额、不改方向 —— 所以 DOWN 的空头同样会被缩。
     """
     w = WEIGHTS.get(coin)
     if w is None:
         return 0.0, f"{coin} 不在配置表里"
-    base = capital * w * BASE_RATIO
-    add = capital * w * ADD_RATIO
+    base = capital * w * BASE_RATIO * scale
+    add = capital * w * ADD_RATIO * scale
 
     if closing:
         return 0.0, "日线已翻转 → 先平仓（反手等下一根 4H）"
@@ -90,11 +99,11 @@ def target(capital, coin, state, adding=False, closing=False):
     return (0.0, "日线 DOWN｜未跌破 → 空仓等信号")
 
 
-def split(capital, coin):
+def split(capital, coin, scale=1.0):
     """把单币额度拆成 (底仓, 加仓层, 空头峰值)。用于下单时预留资金。"""
     w = WEIGHTS.get(coin, 0.0)
-    base = capital * w * BASE_RATIO
-    add = capital * w * ADD_RATIO
+    base = capital * w * BASE_RATIO * scale
+    add = capital * w * ADD_RATIO * scale
     return base, add, (-add if ALLOW_SHORT else 0.0)
 
 

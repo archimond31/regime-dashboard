@@ -189,3 +189,7 @@ _tickets.json
 !_diag_vt_why.py
 # lb=120/180 完整对照（逐年 / 剔除2021 / 滚动窗口 / BTC反事实 / WF静态）
 !_exp_vt_long.py
+# 波动目标化（VT60）：生产模块 + 一致性校验 + 决策记录
+!vol_target.py
+!_parity_vt.py
+!05_波动目标化_VT60.md
