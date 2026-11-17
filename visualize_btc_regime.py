@@ -451,19 +451,45 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
     return st, (bull, bear) if use_div else None, triggers
 
 
-def build(dates, closes, states):
+def build(dates, closes, states, blood=None):
+    """逐日状态 → 点列 + 连续区间。
+
+    blood（可选）：与 dates 等长的「血统」列表，即 daily_states 第三个返回值
+    （稀疏的 triggers）展开成逐日归属。给了就写进每个区间的 "blood" 字段，
+    供 gen_svg / seg_table 标注「初始化血统」——
+    那是状态机刚预热完的初始均线猜测，既不受 MA60 纠错、也不受背离失败约束，
+    上涨行情里会长期锁死（HYPE 2025-04-04→05-23 判「下降」而实际 +178.1%）。
+    """
     pts = [(dates[i], closes[i], states[i]) for i in range(len(dates))
            if states[i] is not None and dates[i] >= START]
     segs = []
-    for d, c, s in pts:
+    for i in range(len(dates)):
+        if states[i] is None or dates[i] < START:
+            continue
+        d, c, s = dates[i], closes[i], states[i]
+        b = blood[i] if (blood is not None and i < len(blood)) else None
         if segs and segs[-1]["state"] == s:
             segs[-1]["end"] = d
             segs[-1]["end_close"] = c
             segs[-1]["days"] += 1
         else:
             segs.append({"state": s, "start": d, "end": d,
-                         "start_close": c, "end_close": c, "days": 1})
+                         "start_close": c, "end_close": c, "days": 1, "blood": b})
     return pts, segs
+
+
+# 血统中文简称：一个区间的状态是「被哪类事件带进来的」，决定它有没有纠错通道。
+BLOOD_CN = {
+    "init_ma120": "初始化",
+    "divergence_top": "背离", "divergence_bottom": "背离",
+    "ma60_cross_up": "均线穿越", "ma60_cross_down": "均线穿越",
+    "cross_fix_up": "均线纠错", "cross_fix_down": "均线纠错",
+    "rsi_retrigger_up": "RSI再触发", "rsi_retrigger_down": "RSI再触发",
+    "rsi_overbought_exit": "RSI离场", "rsi_oversold_exit": "RSI离场",
+    "div_fail_top": "背离失败", "div_fail_bottom": "背离失败",
+    "div_expiry_top": "背离过期", "div_expiry_bottom": "背离过期",
+    "trend_flat_up": "盘整识别", "trend_flat_down": "盘整识别",
+}
 
 
 def merge_short_segments(segs, min_days=3, keep_last=True):
@@ -580,6 +606,9 @@ def to_weekly(rows, min_bars=3, drop_current=True, today=None):
     return out
 
 
+_pat_seq = [0]   # SVG pattern id 计数器（同页多个 <svg>，id 必须唯一）
+
+
 def gen_svg(pts, segs, div_marks=None):
     W, LEFT, RIGHT, TOP, BOT = 1180, 74, 26, 44, 44
     plot_w = W - LEFT - RIGHT
@@ -601,10 +630,24 @@ def gen_svg(pts, segs, div_marks=None):
 
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
          f'font-family="Microsoft YaHei,Arial,sans-serif">']
+    # 「初始化血统」的区间加斜纹：它只是状态机预热后的初始均线猜测，没有纠错通道
+    # （见 build() 的 blood 说明）。一页上有 20 多个 SVG，pattern id 必须唯一，
+    # 否则 url(#hx) 会全部指向第一个 definition。
+    init_segs = [s for s in segs if s.get("blood") == "init_ma120"]
+    pid = ""
+    if init_segs:
+        _pat_seq[0] += 1
+        pid = f"hx{_pat_seq[0]}"
+        p.append(f'<defs><pattern id="{pid}" width="6" height="6" patternUnits="userSpaceOnUse" '
+                 f'patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" '
+                 f'stroke="#b02a2a" stroke-width="1.6" opacity="0.45"/></pattern></defs>')
     for s in segs:
         x0, x1 = x(s["start"]), x(s["end"])
         p.append(f'<rect x="{x0:.1f}" y="{TOP}" width="{max(x1 - x0, 1):.1f}" height="{plot_h}" '
                  f'fill="{STATE_HEX[s["state"]]}" opacity="0.55"/>')
+        if pid and s.get("blood") == "init_ma120":
+            p.append(f'<rect x="{x0:.1f}" y="{TOP}" width="{max(x1 - x0, 1):.1f}" height="{plot_h}" '
+                     f'fill="url(#{pid})" stroke="#b02a2a" stroke-width="1" stroke-dasharray="2,2"/>')
     for i in range(5):
         yy = TOP + plot_h * i / 4
         val = pmax - (pmax - pmin) * i / 4
@@ -630,20 +673,29 @@ def gen_svg(pts, segs, div_marks=None):
         p.append(f'<line x1="{xx:.1f}" y1="{TOP}" x2="{xx:.1f}" y2="{TOP + plot_h}" '
                  f'stroke="{STATE_COLOR[s["state"]]}" stroke-width="1" stroke-dasharray="3,3"/>')
         mid = x(s["start"]) + (x(s["end"]) - x(s["start"])) / 2
+        lab = STATE_CN[s["state"]] + ("⚠" if s.get("blood") == "init_ma120" else "")
         p.append(f'<text x="{mid:.1f}" y="{TOP - 10}" text-anchor="middle" font-size="11" font-weight="bold" '
-                 f'fill="{STATE_COLOR[s["state"]]}">{STATE_CN[s["state"]]}</text>')
+                 f'fill="{STATE_COLOR[s["state"]]}">{lab}</text>')
     lx = LEFT + 10
     for k, lab in (("UP", "上升"), ("RANGE", "震荡"), ("DOWN", "下降")):
         p.append(f'<rect x="{lx}" y="{H - 12}" width="12" height="12" fill="{STATE_HEX[k]}" stroke="{STATE_COLOR[k]}"/>')
         p.append(f'<text x="{lx + 16}" y="{H - 1}" font-size="10" fill="#333">{lab}</text>')
         lx += 70
+    if pid:
+        p.append(f'<rect x="{lx}" y="{H - 12}" width="12" height="12" fill="url(#{pid})" stroke="#b02a2a"/>')
+        p.append(f'<text x="{lx + 16}" y="{H - 1}" font-size="10" fill="#b02a2a">初始化·不可纠错</text>')
+        lx += 110
     if div_marks:
         p.append(f'<text x="{W - RIGHT - 20}" y="{H - 1}" text-anchor="end" font-size="10" fill="#333">▲底背离(切上升) ▼顶背离(切下降)</text>')
     p.append("</svg>")
     return "".join(p)
 
 
-def seg_table(segs):
+def seg_table(segs, show_blood=None):
+    """区间明细表。show_blood=None 时自动判断：本批区间带血统信息才加那一列，
+    否则其他脚本（ETH/黄金等）会多出一列全「—」的噪声。"""
+    if show_blood is None:
+        show_blood = any(s.get("blood") for s in segs)
     rows = ""
     for i, s in enumerate(segs):
         chg = (s["end_close"] / s["start_close"] - 1) * 100
@@ -651,13 +703,31 @@ def seg_table(segs):
         # 和上面那些已经封口的历史段不是一回事，标出来免得被当成定论。
         live = (" <span style='font-weight:normal;color:#888;font-size:10px;'>进行中</span>"
                 if i == len(segs) - 1 else "")
+        bcell = ""
+        if show_blood:
+            b = s.get("blood")
+            if b == "init_ma120":
+                bcell = ("<td style='color:#b02a2a;font-weight:bold;' "
+                         "title='状态机预热后的初始均线猜测：不受 MA60 反向穿越纠错、"
+                         "也不受背离失败约束，只有「RSI 破极值后回升」一个出口 —— "
+                         "上涨行情中该出口永不触发，会长期锁死。交易层此段不开新仓。'>"
+                         "⚠ 初始化</td>")
+            elif b:
+                bcell = f"<td style='color:#888;'>{BLOOD_CN.get(b, b)}</td>"
+            else:
+                bcell = "<td style='color:#bbb;'>—</td>"
+        # 初始化血统 + 该段是「下降」却上涨：这正是需要被看见的那种自相矛盾
+        odd = (s.get("blood") == "init_ma120" and s["state"] == "DOWN" and chg > 0)
         rows += (f"<tr><td style='color:{STATE_COLOR[s['state']]};font-weight:bold;'>{STATE_CN[s['state']]}{live}</td>"
+                 f"{bcell}"
                  f"<td>{s['start']}</td><td>{s['end']}</td><td style='text-align:center;'>{s['days']}</td>"
                  f"<td style='text-align:right;'>{_px(s['start_close'])}</td>"
                  f"<td style='text-align:right;'>{_px(s['end_close'])}</td>"
-                 f"<td style='text-align:right;color:{'#d23c3c' if chg >= 0 else '#1a7f37'};'>{chg:+.1f}%</td></tr>")
+                 f"<td style='text-align:right;color:{'#d23c3c' if chg >= 0 else '#1a7f37'};'>"
+                 f"{chg:+.1f}%{' ⚠' if odd else ''}</td></tr>")
+    bth = "<th>血统</th>" if show_blood else ""
     return f"""<table border="0" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-size:11px;">
-<tr style="background:#f0f0f0;text-align:left;"><th>状态</th><th>起始</th><th>结束</th><th>天数</th><th>起始价</th><th>结束价</th><th>涨跌</th></tr>{rows}</table>"""
+<tr style="background:#f0f0f0;text-align:left;"><th>状态</th>{bth}<th>起始</th><th>结束</th><th>天数</th><th>起始价</th><th>结束价</th><th>涨跌</th></tr>{rows}</table>"""
 
 
 def main():

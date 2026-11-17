@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 
 from visualize_btc_regime import (
     daily_states, build, merge_short_segments, gen_svg, seg_table, fetch_binance_daily,
+    BLOOD_CN,
 )
 from visualize_eth_gold_regime import fetch_yahoo_daily
 from daily_regime_alert import (
@@ -95,6 +96,21 @@ def trim_unclosed(a, rows):
     return drop_unclosed_cn(rows) if a["source"] == "ashare" else drop_unclosed(rows)
 
 
+def _blood_cell(b):
+    """总览表里的「血统」格：当前状态是被哪类事件带进来的。
+
+    这一列不是装饰 —— 它决定该状态有没有纠错通道：
+    均线穿越进来的能被 MA60 送回去，背离进来的能被「背离失败」推翻，
+    初始化进来的两条都不管（见 build_dashboard 页脚与 visualize_btc_regime._cf_ok）。"""
+    if b == "init_ma120":
+        return ("<td style='text-align:center;color:#b02a2a;font-weight:bold;' "
+                "title='当前状态来自状态机预热后的初始均线判断：不受 MA60 纠错、不受背离失败约束，"
+                "只有「RSI 破极值后再回升」一个出口；交易层此段不开新仓'>⚠初始化</td>")
+    if b:
+        return f"<td style='text-align:center;color:#666;'>{BLOOD_CN.get(b, b)}</td>"
+    return "<td style='text-align:center;color:#bbb;'>—</td>"
+
+
 def render_summary(summary):
     groups = {}
     for s in summary:
@@ -131,11 +147,12 @@ def render_summary(summary):
                 f"<td style='text-align:right;'>{fmt_price(s['regime'].get('ma120'))}</td>"
                 f"<td style='white-space:nowrap;color:#666;'>{s['regime'].get('trigger_date', '—')}</td>"
                 f"<td>{trig_cn(s['regime'].get('trigger', ''))}</td>"
-                f"<td style='text-align:center;'>{s['regime'].get('since_days', '-')}</td></tr>")
+                + _blood_cell(s.get("cur_blood"))
+                + f"<td style='text-align:center;'>{s['regime'].get('since_days', '-')}</td></tr>")
         blocks += (
             f"<h3 class='group'>{g}（{len(groups[g])}）</h3>"
             f"<table class='sum'><tr><th>品种</th><th>日线</th><th>周线</th><th>收盘</th><th>RSI14</th>"
-            f"<th>MA60</th><th>MA120</th><th>触发日期</th><th>最近触发</th><th>持续(日)</th></tr>"
+            f"<th>MA60</th><th>MA120</th><th>触发日期</th><th>最近触发</th><th>血统</th><th>持续(日)</th></tr>"
             f"{trs}</table>")
     return blocks
 
@@ -228,10 +245,32 @@ def main():
             s0 = bisect.bisect_left(dates, START)
             if s0 < 120:
                 s0 = 120
-            st, div, _trig = daily_states(closes, s0, 70, 30, True, 2, True)
-            pts, segs = build(dates, closes, st)
+            st, div, trig = daily_states(closes, s0, 70, 30, True, 2, True)
+            # daily_states 的第三个返回值是「稀疏触发点」，展开成逐日血统：
+            # 某个区间的状态是「被哪类事件带进来的」，决定它有没有纠错通道。
+            blood = []
+            _b = None
+            for i in range(len(dates)):
+                if i < len(trig) and trig[i]:
+                    _b = trig[i]
+                blood.append(_b)
+            pts, segs = build(dates, closes, st, blood)
             raw_n = len(segs)
             segs = merge_short_segments(segs, MIN_DAYS)
+            init_days = sum(s["days"] for s in segs if s.get("blood") == "init_ma120")
+            # 每个品种的初始化段只有一段，且必然落在 s0（状态机只能从一根均线上开始猜）；
+            # 22 张图全都挂红标签等于没标签，所以只挑真正扎眼的两类标：
+            #   contra —— 判「下降」却在涨（HYPE 2025 那种），或判「上升」却在跌
+            #   stuck  —— 一段初始猜测挂了 90 天以上，没有任何事件推翻过它
+            init_flag = None
+            init_seg_ = next((s_ for s_ in segs if s_.get("blood") == "init_ma120"), None)
+            if init_seg_:
+                _chg = init_seg_["end_close"] / init_seg_["start_close"] - 1
+                if ((init_seg_["state"] == "DOWN" and _chg >= 0.10)
+                        or (init_seg_["state"] == "UP" and _chg <= -0.10)):
+                    init_flag = {"kind": "contra", "chg": _chg, "seg": init_seg_}
+                elif init_seg_["days"] >= 90:
+                    init_flag = {"kind": "stuck", "chg": _chg, "seg": init_seg_}
             marks = []
             if div:
                 bull, bear = div
@@ -247,14 +286,18 @@ def main():
                 "weekly_state": wstate, "gate": gate,
                 "svg": gen_svg(pts, segs, marks), "table": seg_table(segs), "n_seg": len(segs),
                 "raw_n": raw_n, "merged": raw_n - len(segs), "as_of": dates[-1], "stale": False,
+                "init_days": init_days, "init_flag": init_flag,
+                "now_init": bool(blood and blood[-1] == "init_ma120"),
             })
             summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
                             "unit": a.get("unit", ""), "regime": reg, "stale": False,
-                            "weekly_state": wstate, "gate": gate, "gate_note": gate_note})
+                            "weekly_state": wstate, "gate": gate, "gate_note": gate_note,
+                            "cur_blood": blood[-1] if blood else None})
             new_state[a["key"]] = dict(reg, weekly_state=wstate, gate=gate)
             print(f"[{a['key']:5}] 日{STATE_CN.get(state, state):3} "
                   f"周{STATE_CN.get(wstate, wstate or '—'):3} {GATE_CN.get(gate, gate):2} "
-                  f"{len(segs)} 个区间（合并 {raw_n - len(segs)} 个碎片）  {dates[-1]}")
+                  f"{len(segs)} 个区间（合并 {raw_n - len(segs)} 个碎片）  {dates[-1]}"
+                  + (f"  ⚠初始化血统 {init_days} 天" if init_days else ""))
         except Exception as e:  # noqa: BLE001
             prev = prev_assets.get(a["key"])
             if prev:
@@ -302,6 +345,20 @@ def main():
                          f"周线 {STATE_CN.get(wst, wst)}</span>")
             if c.get("gate") == "block":
                 wchip += "<span class='wk blk'>日周反向</span>"
+            fl = c.get("init_flag")
+            if fl:
+                sg = fl["seg"]
+                base = ("状态机预热后的初始均线猜测：既不受 MA60 纠错、也不受背离失败约束，"
+                        "只有「RSI 破极值后再回升」一个出口 —— 上涨行情中该出口永不触发，会长期锁死。"
+                        "交易层此段不开新仓（既有底仓照常持有、按翻转平）。")
+                if fl["kind"] == "contra":
+                    wchip += (f"<span class='wk bad' title=\"{base} 本例：{sg['start']}→{sg['end']} "
+                              f"判「{STATE_CN.get(sg['state'], sg['state'])}」而价格 {fl['chg']:+.1%}，"
+                              f"{sg['days']} 天。\">⚠ 初始化段反向 {sg['days']} 天</span>")
+                else:
+                    wchip += (f"<span class='wk bad' title=\"{base} 本例：{sg['start']}→{sg['end']} 挂了 "
+                              f"{sg['days']} 天，期间价格 {fl['chg']:+.1%}。\">"
+                              f"⚠ 初始化段 {sg['days']} 天未纠错</span>")
             card_blocks += (
                 f"<div class='card' data-group='{c['group']}' data-state='{c['state']}'>"
                 f"<div class='card-head'><span class='name'>{c['label']}</span>"
@@ -342,6 +399,7 @@ def main():
   .wk {{ display:inline-block; margin-left:8px; padding:1px 9px; border:1px solid #ccc;
     border-radius:10px; font-size:12px; background:#fff; }}
   .wk.blk {{ background:#fff8ec; border-color:#e0b060; color:#8a5a00; }}
+  .wk.bad {{ background:#fdecec; border-color:#b02a2a; color:#b02a2a; font-weight:bold; }}
   .stats {{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 16px; }}
   .sc {{ background:#fff; border-radius:10px; padding:10px 16px; box-shadow:0 1px 3px rgba(0,0,0,.08); }}
   .sc.main {{ border-left:5px solid #3a7bd5; }}
@@ -385,7 +443,8 @@ def main():
   {render_summary(summary)}
 
   <h2 class="sec">各品种 2024 年以来趋势区间</h2>
-  <p class="sub">色带为每日状态区间；▲=底背离(切上升) ▼=顶背离(切下降)；持续 &lt;{MIN_DAYS} 天碎片已合并，
+  <p class="sub">色带为每日状态区间；<b style="color:#b02a2a;">红色斜纹段 = 初始化血统</b>
+  （状态机起点的均线猜测，不可纠错，详见页脚）；▲=底背离(切上升) ▼=顶背离(切下降)；持续 &lt;{MIN_DAYS} 天碎片已合并，
   <b>但最后一段（进行中的当前状态）不合并</b> —— 它天数少是因为还没走完，不是因为它短命；
   并掉它会让色带尾部与上方总览的「当前状态」互相矛盾。</p>
   <div id="cardwrap">{card_blocks}</div>
@@ -395,6 +454,18 @@ def main():
     判定规则（日线状态机 G 方案）：MA120 初始化定方向 → 趋势中 RSI 连续 2 日站上 70/30 后回落离开极值转震荡 →
     震荡中 MA60 穿越或 RSI 再触发回趋势；叠加 RSI 背离（最高优先级）、反向穿越纠错、背离失败检测。
     短历史品种（如 HYPE）自动用「数据起点 + 120 根热身」动态起点。<br>
+    <b style="color:#b02a2a;">血统（斜纹段 = 初始化·不可纠错）</b>：每个状态区间都记着它是<b>被哪类事件带进来的</b>，
+    而这决定了它能不能被纠错 —— 「均线穿越」进来的可以再被 MA60 反向穿越送回去；
+    「背离」进来的可以被「背离失败」推翻（但豁免 MA60，因为逆势信号经不起均线纠错）；
+    「初始化」进来的<b>两条通道都不管</b>，出口只剩「RSI 破超卖后再升破超卖」这一个。
+    上涨行情里 RSI 永不破 30，于是该出口永不触发 —— 状态就此锁死。<br>
+    实例：HYPE 2025-04-04→05-23 判「下降」共 50 天，价格却是 <b>+178.1%</b>
+    （日线只有 713 根，热身点落在上线后 $34→$7 那波暴跌里，MA120 一路被压着）。
+    这是<b>状态机的已知缺陷，不是数据错误</b>：修复方案在交易层落地 ——
+    该血统下<b>不开新仓</b>（既有底仓仍按状态持有、按翻转平），因为实测把「初始化」交给 MA60 纠错
+    会在真下跌行情里把你踢出空头再骗你做多（10 币样本外 2 改善 / 3 变差），得不偿失。
+    面板仍如实画出当时的状态判断，只在图上打折线标注、并在区间明细里给出「⚠ 初始化」，
+    免得把「判错了」和「当时是这么想的」混为一谈。<br>
     <b>多周期（周线）状态</b>：周线跑<b>同一套</b>状态机，参数为日线的 ÷5 机械映射
     （MA120→MA24、MA60→MA12，自由度为 0，不为周线单独调参）；只取已走完的周，
     当前周未收盘前不参与判定。日线与周线方向相反时标「日周反向」，<b>仅作状态描述</b>——
