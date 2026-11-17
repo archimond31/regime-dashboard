@@ -179,3 +179,9 @@ _tickets.json
 !_exp_warm.py
 !_exp_initfix.py
 !_probe_start.py
+# 等风险 vs 等资金（波动目标化）对照：主实验 / 逐年拆解 / 再平衡修正 / 参数网格 / 软约束
+!_exp_voltarget.py
+!_exp_vt_years.py
+!_exp_vt_rebal.py
+!_exp_vt_grid.py
+!_exp_vt_softcap.py
