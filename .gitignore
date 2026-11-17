@@ -187,3 +187,5 @@ _tickets.json
 !_exp_vt_softcap.py
 # VT 超额归因（分币贡献 / 水平vs择时 / 波动-收益秩相关 / BTC反事实）
 !_diag_vt_why.py
+# lb=120/180 完整对照（逐年 / 剔除2021 / 滚动窗口 / BTC反事实 / WF静态）
+!_exp_vt_long.py
