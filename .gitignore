@@ -185,3 +185,5 @@ _tickets.json
 !_exp_vt_rebal.py
 !_exp_vt_grid.py
 !_exp_vt_softcap.py
+# VT 超额归因（分币贡献 / 水平vs择时 / 波动-收益秩相关 / BTC反事实）
+!_diag_vt_why.py
