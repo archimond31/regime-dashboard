@@ -31,6 +31,34 @@ def regime_series(daily, ma_slow=120):
     return {d: s for d, s in zip(dates, st) if s in ("UP", "RANGE", "DOWN")}
 
 
+def regime_and_blood(daily, ma_slow=120):
+    """日线状态序列 + 每个状态所属的「血统」（最近一次非空触发类型）。
+
+    血统决定这个状态能不能被纠错：
+      range_cross   —— 受 MA60 反向穿越纠错（cross_fix）
+      divergence    —— 受「背离失败」纠错（div_fail），但豁免 MA60（逆势信号）
+      init_ma120    —— **两条都不管**。出口只剩「RSI 破 os 后再升破 os」，
+                       上涨行情中永不触发 → 状态死锁。
+
+    实例（2026-11-17 发现）：HYPE 2025-04-04 以 init_ma120 判定 DOWN，
+    直到 05-22 才靠一次误判的顶背离「背离失败」脱身，锁死 48 天，
+    期间价格 11.886 → 33.461（+181.5%），策略反向做空 4 次全止损。
+    因此需要把血统暴露出来：下游据此禁止在 init 血统下开新仓，面板据此标注。
+    """
+    from visualize_btc_regime import daily_states
+    dates = [r["date"] for r in daily]
+    closes = [r["close"] for r in daily]
+    st, _ma, tg = daily_states(closes, ma_slow, 70, 30, True, 2, True)
+    states, blood, cur = {}, {}, None
+    for d, s, t in zip(dates, st, tg):
+        if t is not None:            # 触发只在状态切换日出现，非空即当前段的起点
+            cur = t
+        if s in ("UP", "RANGE", "DOWN"):
+            states[d] = s
+            blood[d] = cur
+    return states, blood
+
+
 def align_regime_safe(bars, reg_map):
     """1H/4H bar → 「严格早于其日期的最后一根日线」确认的状态。无未来函数。
 

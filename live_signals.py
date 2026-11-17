@@ -32,9 +32,31 @@ from fetch_binance_vision import load_bars, to_daily
 from fetch_hyperliquid import load_hype
 from test_regime_fit import agg4h
 from _proto_4h import atr_wilder
-from strategy_1h_rsi import regime_series, align_regime_safe
+from strategy_1h_rsi import regime_series, regime_and_blood, align_regime_safe
 import bt_skeleton as BT
 import portfolio_config as PC
+
+# 状态血统的中文标签。血统决定这段状态能不能被纠错：
+#   init_ma120 —— 状态机刚预热完的初始猜测，既不受 MA60 纠错、也不受背离失败约束，
+#                 出口只剩「RSI 破 os 再升破」，上涨行情中永不触发（HYPE 2025-04 锁死 48 天）。
+#   其余 —— 都有对应的退出通道。
+BLOOD_LABEL = {
+    "init_ma120": "初始化·不可纠错",
+    "divergence_bottom": "底背离",
+    "divergence_top": "顶背离",
+    "ma60_cross_up": "MA60上穿",
+    "ma60_cross_down": "MA60下穿",
+    "rsi_retrigger_up": "RSI再触发↑",
+    "rsi_retrigger_down": "RSI再触发↓",
+    "rsi_overbought_exit": "超买退出",
+    "rsi_oversold_exit": "超卖退出",
+    "cross_fix_up": "MA60纠错↑",
+    "cross_fix_down": "MA60纠错↓",
+    "div_fail_top": "顶背离失败",
+    "div_fail_bottom": "底背离失败",
+    "trend_flat_up": "盘整识别↑",
+    "trend_flat_down": "盘整识别↓",
+}
 
 COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "CRV", "UNI", "AAVE"]
 SECTOR = {"BTC": "储值", "ETH": "L1", "SOL": "L1", "BNB": "交易所", "XRP": "支付",
@@ -93,11 +115,14 @@ def load_coin(c, now):
 def analyze(c, now):
     b4, d1 = load_coin(c, now)
     n = len(b4)
-    reg_map = regime_series(d1)
+    reg_map, blood_map = regime_and_blood(d1)
     rg4 = align_regime_safe(b4, reg_map)
+    blood4 = align_regime_safe(b4, blood_map)
     atr = atr_wilder(b4, 14)
     pct = BT.atr_percentile(b4, atr, coin=c)
-    sig, trades = BT.signals(b4, rg4, atr, vol_q=VOL_Q, coin=c)
+    # 显式传 blood4：生产走 d1 → 血统的精确路径，与 rg4 完全同源。
+    # BT.BLOCK_INIT 打开时，init 血统（状态机刚预热完的初始猜测）不开新仓。
+    sig, trades = BT.signals(b4, rg4, atr, vol_q=VOL_Q, coin=c, blood4=blood4)
 
     last = b4[-1]
     px = last["close"]
@@ -121,6 +146,12 @@ def analyze(c, now):
     while k_seg > 0 and rg4[k_seg - 1] == state:
         k_seg -= 1
     o["regime_start"] = b4[min(k_seg, len(b4) - 1)]["date"]
+
+    # 血统：这段状态是怎么来的，以及能不能被纠错。
+    # init 血统 = 不可纠错，实盘在 BT.BLOCK_INIT 打开时不据此开新仓。
+    o["blood"] = blood4[-1] if blood4 else None
+    o["blood_label"] = BLOOD_LABEL.get(o["blood"], o["blood"] or "—")
+    o["blood_locked"] = o["blood"] == "init_ma120"
 
     # ---- 当前是否持仓：最后一笔的出场点是否就是序列末尾（且没到 120 根）----
     holding = None

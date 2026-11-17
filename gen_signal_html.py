@@ -132,11 +132,17 @@ for o in COINS:
             trig, tcol = "—", MU
     gtxt = f"{g*100:.0f}%" if g is not None else "—"
     gcol = "#ef6c00" if o["gate_blocked"] else (TX if g is not None and g > 0.7 else MU)
+    # 血统标注：只标「不可纠错」的那种，其余留白，避免表格噪声。
+    # init 血统 = 状态机刚预热完的初始猜测，没有均线/背离纠错通道，
+    # 出口只剩「RSI 破 os 再升破」；实盘在这段不据此开新仓。
+    _lock = o.get("blood_locked")
+    st_tail = ('<div style="font-size:10px;color:#d32f2f;margin-top:2px;line-height:1.2">'
+               '⚠ 初始化<br>不可纠错</div>' if _lock else "")
     rows += (
         f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px"><b>{o["c"]}</b>'
         f'<span style="color:{MU};font-size:11px"> {o["sector"]}</span></td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;color:{state_color(st)};'
-        f'font-weight:600;text-align:center">{st}</td>'
+        f'font-weight:600;text-align:center;white-space:nowrap">{st}{st_tail}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right">{px(o["px"])}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{MU}">'
         f'{pct(o["atrp"]*100) if o["atrp"] else "—"}</td>'
@@ -157,7 +163,10 @@ all_block = (
     + f'</tr>{rows}</table>'
     f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
     f'「距触发」：空仓时还要走多少才突破 20 根极值（正数=需要朝该方向再走这么多）。'
-    f'「波动分位」> 85% 会被闸门拦截，不开新仓。</div>')
+    f'「波动分位」> 85% 会被闸门拦截，不开新仓。<br>'
+    f'<b>「⚠ 初始化」</b>：这段状态来自状态机刚预热完的初始均线判断，'
+    f'既不受 MA60 纠错、也不受「背离失败」约束，只有「RSI 破 30 再升破」一个出口——'
+    f'上涨行情中该出口永不触发，会长时间锁死。此段不开新仓，已有持仓照常按翻转平。</div>')
 
 # ---------- 顶部 KPI ----------
 nearest = min((o for o in COINS if not o["pos"] and o.get("need") is not None),

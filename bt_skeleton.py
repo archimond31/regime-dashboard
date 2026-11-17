@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_1h_v2 as V2
 from test_regime_fit import agg4h, expo4
 from _proto_4h import atr_wilder
+from strategy_1h_rsi import align_regime_safe, regime_and_blood
 
 COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "LINK", "CRV", "UNI", "AAVE"]
 EXTRA = ["DOGE", "LTC", "TRX", "XLM", "ATOM", "ALGO", "AVAX", "DOT", "NEAR", "SAND"]
@@ -82,6 +83,52 @@ START_NAV = "2018-01-01"
 # 3bp/日 ≈ 11%/年，是 BTC 永续牛市 funding 均值附近
 FUND_DAILY = 0.0003
 SPOT_BASE = True
+# init 血统期间禁止开新仓（底仓仍按状态，只是不吃 L2 突破单）。
+# 依据：2026-11-17 查 HYPE 2025-04-04~05-22 被判 DOWN 达 48 天（价格 +181.5%），
+#   根因是 init_ma120 血统的 DOWN 出口只剩「RSI 破 os 后再升破 os」，上涨行情永不触发；
+#   策略在该段反向做空 4 次全部止损（−4R）。
+# 对照实验（_exp_hype_fix.py 变体 D）：10 币「上线初期 200 天」样本外 6 改善 / 1 变差，
+#   组合 Calmar 0.82→0.84，HYPE 2025 −33.7%→−26.7%，唯一变差是 SOL 上线初期 −44.4pp
+#   （2020-12 起的超级牛市，禁开仓错过加仓层）。
+# 可用环境变量 SKEL_BLOCK_INIT=0 关掉，便于做 A/B 对照。
+BLOCK_INIT = os.environ.get("SKEL_BLOCK_INIT", "1") == "1"
+_BLOOD_CACHE = {}
+
+
+def _daily_closes(b4):
+    """4H → 日线收盘序列（只保留状态机需要的最小字段）。
+
+    不用 to_daily：agg4h 的输出没有 "t" 字段，而且状态机只看 close。
+    语义与 to_daily 一致 —— 取每个交易日的最后一根 4H 收盘。
+    """
+    out, cur = [], None
+    for b in b4:
+        d = b["date"]
+        if cur is None or cur["date"] != d:
+            if cur:
+                out.append(cur)
+            cur = {"date": d, "close": b["close"]}
+        else:
+            cur["close"] = b["close"]
+    if cur:
+        out.append(cur)
+    return out
+
+
+def blood_of(b4, coin=None):
+    """每根 4H bar 所属的日线状态血统（用 b4 自己的日线反推，无需原始 1H）。
+
+    与生产口径一致：同一交易日的最后一根 4H 收盘 = 该日 UTC 收盘，
+    再经 align_regime_safe 取「严格早于当日」的状态，无未来函数。
+    """
+    key = (coin, len(b4), b4[0]["date"], b4[-1]["date"])
+    hit = _BLOOD_CACHE.get(key)
+    if hit is not None:
+        return hit
+    _s, bm = regime_and_blood(_daily_closes(b4))
+    out = align_regime_safe(b4, bm)
+    _BLOOD_CACHE[key] = out
+    return out
 
 
 def atr_percentile(b4, atr, window=500, coin=None):
@@ -119,16 +166,26 @@ def atr_percentile(b4, atr, window=500, coin=None):
     return pct
 
 
-def signals(b4, rg4, atr, vol_q=VOL_Q, coin=None):
-    """逐 4H bar 跑 L1+L2+L3，返回 trades 与逐 bar 信号方向。"""
+def signals(b4, rg4, atr, vol_q=VOL_Q, coin=None, blood4=None):
+    """逐 4H bar 跑 L1+L2+L3，返回 trades 与逐 bar 信号方向。
+
+    blood4=None 时按 BLOCK_INIT 自动推算血统；传空列表 [] 可显式关闭屏蔽。
+    """
     n = len(b4)
     sig = [0] * n            # 每根 bar 的目标信号方向（+1 多 / -1 空 / 0 无）
     trades = []
     pct = atr_percentile(b4, atr, coin=coin) if vol_q is not None else None
+    if blood4 is None and BLOCK_INIT:
+        blood4 = blood_of(b4, coin)
     i = max(LOOKBACK + 20, 30)
     while i < n - 1:
         rg = rg4[i]
         if rg not in ("UP", "DOWN") or atr[i] is None:
+            i += 1
+            continue
+        # init 血统 = 状态机刚预热完的初始猜测，没有均线/背离纠错通道，
+        # 拿到方向也靠不住 —— 不许据此开新仓（底仓仍按状态，见 pos = base + sig）。
+        if blood4 and blood4[i] == "init_ma120":
             i += 1
             continue
         if b4[i]["date"] < START_NAV:
