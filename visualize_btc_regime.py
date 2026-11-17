@@ -194,7 +194,8 @@ def divergence_signals(closes, rsi, os=30, ob=70):
 def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cross_fix=False,
                  range_retrigger=True, div_fail=True, div_expiry_days=None, div_expiry_ret=0.0,
                  div_fail_buf=None, trend_flat=False, trend_flat_ext=0.03, trend_flat_ret=0.03,
-                 trend_flat_days=10, ma_slow=120, ma_fast=60):
+                 trend_flat_days=10, ma_slow=120, ma_fast=60,
+                 cross_fix_init=False, div_no_same=False):
     """confirm=1 单日事件触发；confirm>=2 需 RSI 连续 N 日站上 ob（或下 os）才切换。
     趋势→震荡：RSI 连续 confirm 日站上 ob（确认进入超买）后，再跌破 ob（离开超买）才切 RANGE；
       DOWN 对称（确认进入超卖后，再升破 os 才切 RANGE）。强趋势中 RSI 持续超买不离场则不切，
@@ -203,6 +204,15 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
       UP 价格连续 confirm 日跌破 MA60 → DOWN；DOWN 价格连续 confirm 日站上 MA60 → UP。
       仅对「由 RANGE 经 MA60 穿越进入趋势」的状态持续纠错（range_cross 血统），
       不覆盖背离信号与 MA120 初始态。
+    cross_fix_init=True 时，MA60 纠错**额外覆盖 init 血统**（默认 False = 原行为）。
+      背景：init 血统的 DOWN 原本只有「RSI 连续 confirm 日破 os 后再升破 os」这一个出口，
+      上涨行情中 RSI 永不破 os → 状态锁死。HYPE 2025-04-04~05-22 实测锁死 48 天，
+      期间价格 +181.5%，策略反而做空 4 次全止损。init 只是初始化猜测，不该获得
+      「免疫均线纠错」的权利（背离血统仍然豁免，因为它是逆势信号）。
+    div_no_same=True 时，**同向背离不重复触发**（默认 False = 原行为）。
+      原逻辑：已是 DOWN 时若再出顶背离，会重设 entry_reason=divergence 与 fail_level。
+      后果是同一方向的判定被反复「加固」，退出门槛被抬高；实测 HYPE 上涨途中连判
+      两次 divergence_top，把 fail_level 顶到 33.46，多锁了 5 天。
     range_retrigger=True 时，RANGE 态加「RSI 再触发」退出：震荡中 RSI 连续 confirm 日
       重新站上 ob（或跌破 os）→ 切 UP（DOWN），解决价格在 MA60 单侧暴涨/暴跌、永不穿越
       导致的 RANGE 锁死。
@@ -269,11 +279,25 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
         t_fulfilled = False
         t_pullback = 0
 
+    def _cf_ok(reason):
+        """该血统是否受 MA60 反向穿越纠错。
+
+        range_cross：由 MA60 穿越进来的，理应也能被 MA60 送回去（cross_fix）。
+        init       ：只是初始化猜测，cross_fix_init=True 时才受纠错；
+                     否则它在上涨行情中只有「RSI 破 os 再升破」一个出口，实际是死锁。
+        divergence ：逆势信号，均线纠错会砍得太早，始终豁免。
+        """
+        if reason == "range_cross":
+            return cross_fix
+        if reason == "init":
+            return cross_fix_init
+        return False
+
     if trend_flat:
         enter_trend(start_idx)
 
     for i in range(start_idx + 1, n):
-        if use_div and bear[i]:
+        if use_div and bear[i] and not (div_no_same and state == "DOWN"):
             state = "DOWN"; entry_reason = "divergence"; reset()
             triggers[i] = "divergence_top"
             fail_level = (closes[i] * (1 + div_fail_buf) if div_fail_buf is not None
@@ -282,7 +306,7 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
             div_entry_idx = i; div_entry_close = closes[i]; div_extreme = closes[i]
             if trend_flat:
                 enter_trend(i)
-        elif use_div and bull[i]:
+        elif use_div and bull[i] and not (div_no_same and state == "UP"):
             state = "UP"; entry_reason = "divergence"; reset()
             triggers[i] = "divergence_bottom"
             fail_level = (closes[i] * (1 - div_fail_buf) if div_fail_buf is not None
@@ -328,12 +352,12 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
                     ob_confirmed = True
             else:
                 above = 0
-            if cross_fix and entry_reason == "range_cross":
+            if _cf_ok(entry_reason):
                 cross_down = cross_down + 1 if closes[i] < ma60[i] else 0
             if ob_confirmed and rsi[i] < ob:
                 state = "RANGE"; entry_reason = None; reset()
                 triggers[i] = "rsi_overbought_exit"
-            elif cross_fix and entry_reason == "range_cross" and cross_down >= confirm:
+            elif _cf_ok(entry_reason) and cross_down >= confirm:
                 state = "DOWN"; entry_reason = "range_cross"; reset()
                 triggers[i] = "cross_fix_down"
                 if trend_flat:
@@ -381,12 +405,12 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
                     os_confirmed = True
             else:
                 below = 0
-            if cross_fix and entry_reason == "range_cross":
+            if _cf_ok(entry_reason):
                 cross_up = cross_up + 1 if closes[i] > ma60[i] else 0
             if os_confirmed and rsi[i] > os:
                 state = "RANGE"; entry_reason = None; reset()
                 triggers[i] = "rsi_oversold_exit"
-            elif cross_fix and entry_reason == "range_cross" and cross_up >= confirm:
+            elif _cf_ok(entry_reason) and cross_up >= confirm:
                 state = "UP"; entry_reason = "range_cross"; reset()
                 triggers[i] = "cross_fix_up"
                 if trend_flat:
