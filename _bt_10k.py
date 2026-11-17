@@ -87,12 +87,12 @@ trs["HYPE"] = htrades
 W = dict(PC.WEIGHTS)
 
 
-def nav_daily(b4, base, pos, k0, coin, cap, slip_a=0.0):
+def nav_daily(b4, base, pos, k0, coin, cap, slip_a=0.0, k1=None):
     """单币 sleeve 的逐日净值。cap×w 是这个 sleeve 的初始绝对金额。"""
     nav, out = 1.0, {}
     w = W[coin]
     qv = QV.get(coin)
-    for k in range(k0 + 1, len(b4)):
+    for k in range(k0 + 1, (k1 if k1 is not None else len(b4))):
         r = b4[k]["close"] / b4[k - 1]["close"] - 1
         x = 1 + pos[k] * r
         nav *= x if x > 0 else 0.0
@@ -135,17 +135,18 @@ def stats(cur):
             "cagr": vals[-1] ** (365.0 / max(len(vals), 1)) - 1}
 
 
-def run_navs(cap, d0, slip_a):
+def run_navs(cap, d0, slip_a, d1=None):
     navs = []
     for c in COINS:
         b4c, basec, posc = raw[c]
         k0 = next(k for k in range(len(b4c)) if b4c[k]["date"] >= d0)
-        navs.append(nav_daily(b4c, basec, posc, k0, c, cap, slip_a))
+        k1 = next((k for k in range(len(b4c)) if b4c[k]["date"] >= d1), None) if d1 else None
+        navs.append(nav_daily(b4c, basec, posc, k0, c, cap, slip_a, k1))
     return navs
 
 
-def run(cap, d0, slip_a):
-    navs = run_navs(cap, d0, slip_a)
+def run(cap, d0, slip_a, d1=None):
+    navs = run_navs(cap, d0, slip_a, d1)
     return stats(fixed_share(navs, [W[c] for c in COINS]))
 
 
@@ -156,6 +157,8 @@ def pad(s, n, right=False):
     fill = " " * max(0, n - w)
     return fill + s if right else s + fill
 
+
+START_ALL = "2020-09-01"   # 9 币齐全的起点（UNI/AAVE 2020-09/10 上线）
 
 WINDOWS = [
     ("2026 YTD（约 320 天）", "2026-01-01"),
@@ -237,51 +240,11 @@ print(f"多头全满时总名义 {tp:,.0f} U（{tp / 10000:.2f}× 本金），"
       f"空头全满 {sum(10000 * W[c] * 0.5 for c in COINS):,.0f} U（0.50×）")
 print("拆单列 = 要拆成几笔 1% 参与率的单，才能把单笔滑点压在 10 bp 内")
 
-# ---------- 五、分年度 ----------
-print("\n" + "=" * 96)
-print("五、分年度（本金 10000 U，含滑点，连续持仓口径）—— 「一年」到底是哪一年")
-print("-" * 96)
-_cap0 = 10000
-_curve = fixed_share(run_navs(_cap0, "2024-01-01", SLIP_A), [W[c] for c in COINS])
-_dates = [d for d, _ in _curve]
-_vals = [v for _, v in _curve]
-print(pad("区间", 14) + pad("起点", 12, True) + pad("终点", 12, True)
-      + pad("收益", 11, True) + pad("年内回撤", 12, True) + pad("天数", 8, True)
-      + pad("年化", 10, True))
-print("-" * 96)
-YEARS = {}
-for y0, y1 in (("2024-01-01", "2025-01-01"), ("2025-01-01", "2026-01-01"),
-               ("2026-01-01", "2027-01-01")):
-    i0 = next((i for i, d in enumerate(_dates) if d >= y0), None)
-    i1 = next((i for i, d in enumerate(_dates) if d >= y1), len(_dates) - 1)
-    if i0 is None or i1 <= i0:
-        continue
-    seg = _vals[i0:i1 + 1]
-    pk, dd = seg[0], 0.0
-    for v in seg:
-        pk = max(pk, v)
-        dd = min(dd, v / pk - 1)
-    r = seg[-1] / seg[0] - 1
-    nd = i1 - i0
-    lab = y0[:4] + (" YTD" if y1 == "2027-01-01" else "")
-    YEARS[lab] = r
-    print(pad(lab, 14) + pad(f"{_cap0 * seg[0]:,.0f}U", 12, True)
-          + pad(f"{_cap0 * seg[-1]:,.0f}U", 12, True) + pad(f"{r * 100:.1f}%", 11, True)
-          + pad(f"{dd * 100:.1f}%", 12, True) + pad(nd, 8, True)
-          + pad(f"{(seg[-1] / seg[0]) ** (365 / max(nd, 1)) * 100 - 100:.1f}%", 10, True))
-print("-" * 96)
-_tot = _vals[-1] / _vals[0] - 1
-_nd = len(_vals)
-print(f"2024-01-01 起到 {_dates[-1]}：{_cap0:,} U → {_cap0 * _vals[-1]:,.0f} U"
-      f"（累计 {_tot * 100:+.1f}%，{_nd} 天，年化 {(1 + _tot) ** (365 / _nd) * 100 - 100:.1f}%）")
-print("→ 同一套代码，年与年之间的差距比多数人想象的大得多。")
-
-# ---------- 六、基准对照 ----------
+# ---------- 五、逐年（每年初重置权重）----------
 DAILY = {}
 for c in COINS:
-    b4c = raw[c][0]
     d = {}
-    for x in b4c:
+    for x in raw[c][0]:
         d[x["date"]] = x["close"]
     DAILY[c] = d
 
@@ -292,6 +255,71 @@ def _px(c, d):
     return DAILY[c][ks[i]] if i >= 0 else None
 
 
+def bench(d0, d1):
+    """同权重的买入持有，未上线的币按现金（与策略口径一致，否则不可比）。"""
+    tot = 0.0
+    for c in COINS:
+        a, b = _px(c, d0), _px(c, d1)
+        if a and b and b > 0:
+            tot += W[c] * (b / a - 1)
+    return tot
+
+
+print("\n" + "=" * 108)
+print("五、逐年（本金 10000 U，含滑点，每年初把权重重置回目标）")
+print("-" * 108)
+print("  为什么必须重置：不调仓跑到底，SOL 的 sleeve 从 2020-09 涨了 394 倍，")
+print("  期末占组合 85%，「十个品种」名存实亡，后来某一年亏的其实是 SOL 在亏。")
+print("-" * 108)
+print(pad("年份", 12) + pad("期初", 12, True) + pad("期末", 12, True)
+      + pad("策略", 10, True) + pad("年内回撤", 11, True) + pad("等权持有", 11, True)
+      + pad("BTC", 10, True) + pad("超额", 11, True))
+print("-" * 108)
+YEARS = {}
+_nav = 10000.0
+for y in range(2020, 2027):
+    y0 = "2020-09-01" if y == 2020 else f"{y}-01-01"
+    y1 = f"{y + 1}-01-01"
+    s1 = run(10000, y0, SLIP_A, y1)
+    a = next((x["date"] for x in raw["BTC"][0] if x["date"] >= y0), y0)
+    b = next((x["date"] for x in raw["BTC"][0] if x["date"] >= y1),
+             raw["BTC"][0][-1]["date"])
+    bq = bench(a, b)
+    bt_a, bt_b = _px("BTC", a), _px("BTC", b)
+    btc = (bt_b / bt_a - 1) if (bt_a and bt_b) else 0.0
+    lab = str(y) + (" YTD" if y == 2026 else "") + ("(9月起)" if y == 2020 else "")
+    YEARS[str(y)] = s1["ret"]
+    _nav *= (1 + s1["ret"])
+    print(pad(lab, 12) + pad(f"{_nav / (1 + s1['ret']):,.0f}U", 12, True)
+          + pad(f"{_nav:,.0f}U", 12, True)
+          + pad(f"{s1['ret'] * 100:+.1f}%", 10, True)
+          + pad(f"{s1['dd'] * 100:.1f}%", 11, True)
+          + pad(f"{bq * 100:+.1f}%", 11, True) + pad(f"{btc * 100:+.1f}%", 10, True)
+          + pad(f"{(s1['ret'] - bq) * 100:+.1f}pp", 11, True))
+print("-" * 108)
+print(f"  逐年重置后累计：10,000 U → {_nav:,.0f} U（{_nav / 10000 - 1:+.0%}），"
+      f"2020-09 起约 6.2 年，年化 {((_nav / 10000) ** (1 / 6.2) - 1) * 100:+.1f}%")
+print("  注：每年独立起算（年初空仓），与连续持仓差 3~5pp；各年之间因此完全可比。")
+
+# 不调仓对照
+_nv = run_navs(10000, "2020-09-01", SLIP_A)
+_fin = {c: list(_nv[i].values())[-1] for i, c in enumerate(COINS)}
+_val = {c: W[c] * _fin[c] for c in COINS}
+_s = sum(_val.values())          # 倍数：组合净值 = Σ W_c × nav_c
+_no_reb = _s - 1
+print("\n  对照：一次配置、从头不调仓")
+print("-" * 108)
+print(f"  10,000 U → {10000 * _s:,.0f} U（{_no_reb:+.0%}，年化 {( _s ** (1 / 6.2) - 1) * 100:+.1f}%）"
+      f" —— 比逐年重置多 {(_no_reb - (_nav / 10000 - 1)) * 100:+.0f}pp")
+print(f"  但期末权重已经彻底失衡：")
+for c in sorted(COINS, key=lambda x: -_val[x])[:4]:
+    print(f"    {c:<5} 起始 {W[c] * 100:>4.0f}%  →  现在 {_val[c] / _s * 100:>5.1f}%"
+          f"（sleeve {_fin[c]:.1f}x）")
+print(f"    → 这已经不是「十个品种各 10%」，而是「SOL 一个币 + 九个小尾巴」。")
+print(f"    它的 2024 单年 −11.5%、回撤 −70%，本质是 SOL 自己崩，不是策略失效。")
+print("→ 同一套代码，年与年之间的差距比多数人想象的大得多。")
+
+# ---------- 六、基准对照 ----------
 print("\n" + "=" * 96)
 print("六、基准对照：同期买入持有能赚多少（同样 10000 U）")
 print("-" * 96)
@@ -307,7 +335,7 @@ for lab, d0, d1 in SEGS:
         if a and b and b > 0:
             rs[c] = b / a - 1
     eq = sum(rs.values()) / len(rs)
-    st = YEARS.get(lab)
+    st = YEARS.get(lab[:4])
     print(pad(lab, 14) + pad(f"{rs.get('BTC', 0) * 100:+.1f}%", 12, True)
           + pad(f"{rs.get('ETH', 0) * 100:+.1f}%", 12, True)
           + pad(f"{eq * 100:+.1f}%", 12, True)
