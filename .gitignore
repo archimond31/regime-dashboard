@@ -177,4 +177,5 @@ _tickets.json
 # init 血统死锁修复的对照实验（四变体 + 样本外检验）
 !_exp_hype_fix.py
 !_exp_warm.py
+!_exp_initfix.py
 !_probe_start.py
