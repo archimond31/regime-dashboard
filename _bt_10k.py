@@ -125,14 +125,22 @@ def fixed_share(navs, weights):
 
 
 def stats(cur):
+    """区间统计。**必须以区间首值为基准归一化**。
+
+    曾经写成 ret = vals[-1] - 1，隐含假设首日净值恰好 1.0 —— 但 fixed_share
+    输出的第一条已经是「首日涨跌之后」的值（2026 首日 +1.7%），
+    于是每年收益都虚高约 1~2pp，且窗口越短偏差越大。
+    """
     vals = [x[1] for x in cur]
-    pk, dd = vals[0], 0.0
+    v0 = vals[0]
+    pk, dd = v0, 0.0
     for v in vals:
         pk = max(pk, v)
         dd = min(dd, v / pk - 1)
-    return {"final": vals[-1], "ret": vals[-1] - 1, "dd": dd,
+    final = vals[-1] / v0
+    return {"final": final, "ret": final - 1, "dd": dd,
             "n": len(vals),
-            "cagr": vals[-1] ** (365.0 / max(len(vals), 1)) - 1}
+            "cagr": final ** (365.0 / max(len(vals), 1)) - 1}
 
 
 def run_navs(cap, d0, slip_a, d1=None):
