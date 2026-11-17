@@ -195,7 +195,8 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
                  range_retrigger=True, div_fail=True, div_expiry_days=None, div_expiry_ret=0.0,
                  div_fail_buf=None, trend_flat=False, trend_flat_ext=0.03, trend_flat_ret=0.03,
                  trend_flat_days=10, ma_slow=120, ma_fast=60,
-                 cross_fix_init=False, div_no_same=False):
+                 cross_fix_init=False, div_no_same=False, warm_cross=False,
+                 warm_guard_lb=60):
     """confirm=1 单日事件触发；confirm>=2 需 RSI 连续 N 日站上 ob（或下 os）才切换。
     趋势→震荡：RSI 连续 confirm 日站上 ob（确认进入超买）后，再跌破 ob（离开超买）才切 RANGE；
       DOWN 对称（确认进入超卖后，再升破 os 才切 RANGE）。强趋势中 RSI 持续超买不离场则不切，
@@ -235,7 +236,29 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
       长期窄幅盘整仍粘在趋势态的问题（黄金 61 天假 DOWN、69 天假 UP 的根因）。
     ma_slow / ma_fast：慢线（定方向初始化 + 背离态的参照）与快线（震荡中穿越触发）长度。
       日线默认 120/60；周线按「÷5 机械映射」传 24/12（120 交易日≈24 周、60 交易日≈12 周），
-      物理含义不变，只是采样频率降低。自由度为 0，不允许为周线单独调参（避免过拟合）。"""
+      物理含义不变，只是采样频率降低。自由度为 0，不允许为周线单独调参（避免过拟合）。
+    warm_cross=True 时，判定起点做「热身冷却」：不取「刚好凑满 ma_slow 根」那一根，
+      而是等收盘价**首次反向穿越慢线**那天起判。
+      动机：凑满 120 根只是算术门槛，不是经济门槛。HYPE 2024-12 上线，
+      第 121 根落在 2025-04-04，那时 MA120=20.87 仍在消化上线后 $34→$7 的崩盘，
+      收盘 11.89 在均线下方四成 → 必然判 DOWN，而行情早已反转向上，于是锁死 50 天。
+      等到首次上穿 MA120（2025-04-30）再起判，初始状态就是 UP —— 那天是一个
+      **事件**，有方向，不是对一条还没转过来的均线的盲猜。
+      代价：判定推迟（各品种 0~N 天），推迟期间的行情不参与判定。
+      若全程都没穿越，则不给判定（宁缺勿错）。
+
+      **实测结论：默认关闭（2026-11-17，_exp_warm.py，10 币「上线后 400 天」样本外）**
+      · WARM 无条件冷却：首段方向准确率 4/10 → 7/10，但逐币 6 改善 / 4 变差，
+        且输的一侧幅度大得多 —— 上市即垂直上涨的品种被整段踏空
+        （SOL 少赚 2592pp、LINK −398pp、ETH −203pp），赢的一侧只有 +15~53pp。
+      · GUARD 动量闸门：2 改善 / 0 变差 / 8 不变，几乎不起作用，且 **HYPE 在
+        lb=10/20/30/60/120 任何窗口都不触发** —— 因为它 2025-04-04 判 DOWN 时
+        价格确实还在跌（60 日动量为负），「初始方向错」这个前提本身不成立。
+      · 真正对症的是 cross_fix_init（给初始血统 MA60 纠错通道）：同口径 3 改善 /
+        2 变差，HYPE 2025 从 −0.6R 变 +4.4R、400 天窗口 −27.9% → +22.3%，
+        全样本 Calmar 4.94 → 5.28，均优于 WARM。
+      结论：**想要的效果有更便宜的实现，这条规则不该默认开**。
+"""
     n = len(closes)
     st = [None] * n
     triggers = [None] * n
@@ -246,6 +269,30 @@ def daily_states(closes, start_idx, ob=75, os=25, use_div=False, confirm=1, cros
     ma120, ma60 = sma(closes, ma_slow), sma(closes, ma_fast)
     if ma120[start_idx] is None:
         return st, None, triggers
+    if warm_cross:
+        # 热身冷却：等收盘价首次反穿慢线。ref 是「刚凑满窗口那根」的相对位置，
+        # 之后一路找第一个翻面的位置 —— 那天均线才真正被价格确认过。
+        # warm_cross="guard" 时加一道闸门：**只有当初始方向与近 60 日涨跌相反**才冷却。
+        # 方向一致说明均线判的方向本来就是对的（新币上市后一路上涨、状态 UP），
+        # 没必要为了等一次穿越而整段踏空 —— 实测「无条件冷却」会漏掉 SOL/ETH/LINK/UNI
+        # 上市初期的垂直行情（SOL 少赚 2591pp），代价远大于收益。
+        do_cool = True
+        if warm_cross == "guard":
+            up0 = closes[start_idx] >= ma120[start_idx]
+            mom = closes[start_idx] - closes[max(start_idx - warm_guard_lb, 0)]
+            if (up0 and mom >= 0) or (not up0 and mom <= 0):
+                do_cool = False
+        if do_cool:
+            ref = closes[start_idx] >= ma120[start_idx]
+            j = start_idx + 1
+            while j < n:
+                m = ma120[j]
+                if m is not None and (closes[j] >= m) != ref:
+                    break
+                j += 1
+            if j >= n:
+                return st, None, triggers   # 全程没穿越过 → 不给判定，宁缺勿错
+            start_idx = j
     bull = bear = None
     if use_div:
         bull, bear, bull_level, bear_level = divergence_signals(closes, rsi, os, ob)

@@ -20,14 +20,26 @@
   而不是「停留在超卖区的每一根」，否则同一段超卖会连续开仓。
 """
 from _proto_4h import rsi_wilder, sma
+import os
+
+# 热身冷却（warm_cross）：判定起点取「收盘价首次反穿 MA120」而非「刚好凑满 120 根」。
+# 默认关闭，A/B 用环境变量：SKEL_WARM_CROSS=1 打开。
+# 通过环境变量而非函数参数，是为了让 10 个历史脚本的调用点零改动就能复跑对照。
+WARM_CROSS = os.environ.get("SKEL_WARM_CROSS", "0") == "1"
+
+
+def _states(closes, ma_slow):
+    """日线状态机入口：起点口径统一在这里，别处不要再各写一套。"""
+    from visualize_btc_regime import daily_states
+    return daily_states(closes, ma_slow, 70, 30, True, 2, True,
+                        warm_cross=WARM_CROSS)
 
 
 def regime_series(daily, ma_slow=120):
     """日线状态序列（面板同一套状态机）。"""
-    from visualize_btc_regime import daily_states
     dates = [r["date"] for r in daily]
     closes = [r["close"] for r in daily]
-    st, _ma, _tg = daily_states(closes, ma_slow, 70, 30, True, 2, True)
+    st, _ma, _tg = _states(closes, ma_slow)
     return {d: s for d, s in zip(dates, st) if s in ("UP", "RANGE", "DOWN")}
 
 
@@ -45,10 +57,9 @@ def regime_and_blood(daily, ma_slow=120):
     期间价格 11.886 → 33.461（+181.5%），策略反向做空 4 次全止损。
     因此需要把血统暴露出来：下游据此禁止在 init 血统下开新仓，面板据此标注。
     """
-    from visualize_btc_regime import daily_states
     dates = [r["date"] for r in daily]
     closes = [r["close"] for r in daily]
-    st, _ma, tg = daily_states(closes, ma_slow, 70, 30, True, 2, True)
+    st, _ma, tg = _states(closes, ma_slow)
     states, blood, cur = {}, {}, None
     for d, s, t in zip(dates, st, tg):
         if t is not None:            # 触发只在状态切换日出现，非空即当前段的起点
