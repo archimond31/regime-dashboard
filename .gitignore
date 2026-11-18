@@ -197,3 +197,6 @@ _tickets.json
 !_exp_20coins.py
 # 11 币决策评估（去 CRV + DOGE + NEAR）
 !_exp_11coins.py
+# 年度轮动 10 币评估
+!_exp_rot10.py
+!_rot10.log
