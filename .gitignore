@@ -206,3 +206,6 @@ _tickets.json
 # 容量约束权重评估
 !_exp_capw.py
 !_capw.log
+# 50 万本金逐年表现 + 口径 A 对照 + 容量自适应修正（2026-11-18）
+!_exp_yearly.py
+!_yearly.log
