@@ -15,6 +15,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 闸门已默认关闭（去前视后不如不开）。本脚本是「机制核验」，必须显式打开，
+# 否则 series() 会返回全 1.0，[2] 直接等于基线、什么也没验到。
+os.environ["SKEL_BASEGATE"] = "1"
+
 import base_gate as BG
 import bt_skeleton as BT
 import portfolio_config as PC
@@ -141,7 +145,10 @@ def run():
 
 
 cum = run()
-print(f"\n  口径 A 累计：{cum / 1e4:.0f} 万（实验值 378 万，基线 310 万）")
+print(f"\n  口径 A 累计：{cum / 1e4:.0f} 万")
+print("  应对上 277 万（去前视的正确值）。历史数字 378 万含一格前视，已作废。")
+print("  基线（不开闸门）310 万 → 去前视后闸门不如不开，故默认关闭"
+      "（SKEL_BASEGATE=1 才启用）。见 base_gate.py 文件头。")
 
 # ---------- ③ 生产金额核对 ----------
 print("\n[3] portfolio_config.target(base_gate=...) 金额核对（BTC, 5000 本金）")
@@ -158,6 +165,7 @@ print("\n  期望：UP 未突破/底仓、RANGE 的金额按 25% 缩；"
 # 这一项是给「滞回状态怎么落盘」把关：实盘靠 _base_gate.json 记住上一次的取值，
 # 回测靠 series() 内部的 cur 变量。DOWN 时两边都必须重置成「无记忆」，
 # 否则下一段 UP/RANGE 的第一根就会走错分支（曾在这里差出一个 1% 的带子）。
+# 注意：实盘算出的 gate 作用于**下一根**，所以比对前要左移一格（同 series()）。
 print("\n[4] 实盘链路（next_gate + 落盘状态）与回测 base_series() 逐 bar 比对")
 bad2 = 0
 for c in ALL12:
@@ -165,14 +173,17 @@ for c in ALL12:
     b4, d1, rg4 = D["b4"], D["d1"], D["rg4"]
     mm = BG.ma_lookup(d1)
     saved = None                      # = _base_gate.json 里存的 gate_state
-    live = []
+    gs = []
     for k, b in enumerate(b4):
         if rg4[k] == "DOWN":
             g, saved = 1.0, None      # analyze() 里 gate_state = None
         else:
             g = BG.next_gate(b["close"], mm(b["date"]), saved)
             saved = g
-        live.append(BT.BASE.get(rg4[k], 0.0) * g)
+        gs.append(g)
+    # 平移闸门本身，**不是**平移乘完 BASE 的结果 —— 两者在状态切换点会不等
+    gs = [gs[0]] + gs[:-1]
+    live = [BT.BASE.get(rg4[k], 0.0) * gs[k] for k in range(len(gs))]
     ref = BT.base_series(b4, d1, rg4)
     diff = sum(1 for x, y in zip(live, ref) if abs(x - y) > 1e-9)
     bad2 += diff

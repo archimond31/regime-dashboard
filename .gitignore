@@ -215,5 +215,17 @@ _tickets.json
 !base_gate.py
 !_exp_base.py
 !_verify_gate.py
+# 底仓闸门的翻案：一格前视（2026-11-18）—— 结论性证据，务必入库
+!_verify_lookahead.py
+!_diag_gate_why.py
+# P0-3 风险预算换指标：主对照 / 择时 vs 降仓 / 三道过关 / 一次性事件型
+!_exp_risk2.py
+!_exp_risk2b.py
+!_exp_risk2c.py
+!_exp_risk2d.py
+# 执行延迟：4H 上界 / MA×滞回网格 / 1H 粒度延迟曲线
+!_exp_delay_check.py
+!_exp_gate_delay.py
+!_exp_delay_1h.py
 # 不入库：_base_gate.json（闸门滞回状态，同 .notify_state.json，只对本机有意义）
 _base_gate.json

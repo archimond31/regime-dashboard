@@ -99,11 +99,14 @@ def base_series(b4, d1, rg4):
     """底仓系数序列 = 状态基础值 × 底仓闸门。**回测与实盘的唯一入口**。
 
     · 状态基础值：UP/RANGE = 1.0，DOWN = 0.0（BASE 表）
-    · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，SKEL_BASEGATE=0 可关）
+    · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，默认已关闭）
+
+    下标语义：返回值 k 是「在 bar k 期间生效」的系数，即乘在 r[k]=close[k]/close[k-1] 上。
+    闸门内部已经左移一格（gate 是拿 close[k] 算的，只能作用于 bar k+1），
+    这一步不做就是前视 —— 2026-11-18 为此把整条「底仓退出」结论推翻过一次，见 base_gate.py。
 
     实盘 live_signals.analyze() 走的是同一个 base_gate.next_gate()，
-    只是它只需要最后一根的值，这里要整条序列。
-    两者若出现分歧，以本函数的逐 bar 结果为准 —— 回测可复现，实盘可对照。
+    只是它只需要最后一根的值（下一根才生效，天然无前视）。
     """
     import base_gate as BG
     gate = BG.series(b4, d1, rg4)
