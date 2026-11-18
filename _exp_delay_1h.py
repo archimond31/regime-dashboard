@@ -12,7 +12,15 @@
   D=6 → 晚 1 根 4H 再加 2 小时（最坏的人工情形）
 判据：从哪个 D 开始，闸门相对「不开闸门」的超额转负 —— 那就是可执行边界。
 
-注：HYPE 无 1H 归档，本检验只含 11 币（占总权重约 75%），结论方向不受影响。
+注：HYPE 无 1H 归档，本检验只含 11 币（控制组 302 万，12 币口径是 310 万）。
+**只有闸门做进了延迟**；`extra`（ATR 吊灯）仍取当桶，未延迟 —— ATR 的延迟敏感性
+由 4H 粒度的 `_exp_risk2c.py`【3】覆盖（548 万 → 晚一根 187 万），不在本脚本重复。
+
+结论（2026-11-18）：
+  · 闸门 D=0 → 275 万，D≥1 → 270 万，控制组 302 万
+    → 与 4H 口径的 277 万 / 310 万 完全一致，两种粒度下都证实「去前视后闸门是负贡献」
+  · 4H 采样规则没有「延迟 1 小时」这个档位：错过桶边界就等于等下一个边界，
+    所以 D=1/2/3/4 结果完全相同。想要亚 4H 精度，只能把规则本身降到 1H 判定。
 """
 import math
 import os
@@ -20,6 +28,9 @@ import sys
 from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# 闸门已默认关闭；本脚本要测它，必须显式打开（否则 series() 全是 1.0，测了个寂寞）
+os.environ["SKEL_BASEGATE"] = "1"
 
 import base_gate as BG
 import bt_skeleton as BT
@@ -101,27 +112,44 @@ def trail_atr(D, k):
 TRAIL = {c: trail_atr(DATA[c], 1.5) for c in COINS}
 
 
-def nav_1h(c, extra, delay_h):
+def nav_1h(c, extra, delay_h, use_gate=True):
+    """D 小时延迟的执行曲线。
+
+    两个索引必须分清（第一版就是在这里错的）：
+      · 日线状态 rg4 → 用**当前** 4H 桶 k4。regime 是「严格早于该日期的日线」，
+        本来就是因果的，不能跟着延迟一起移。
+      · 闸门 gate → 只能取「已经发生过的决策」。gate(j) 在 bucket j 收盘时才成立，
+        推迟 D 小时意味着 tc >= ts(j) + D 才可用。
+    第一版把 BASE 也跟着 ke 走，等于把状态一起晚一格，结果失真。
+    """
     D = DATA[c]
     k4s, offs, cs, ds = D["k4"], D["off"], D["cs"], D["ds"]
     rg4, sig, gate, coef = D["rg4"], D["sig"], D["gate"], D["coef"]
     n4 = len(rg4)
-    base4 = [BT.BASE.get(rg4[k], 0.0) * gate[k] * extra[k] for k in range(n4)]
-    pv4 = [(base4[k] + BT.ADD * sig[k]) * coef[k] * VT.KAPPA for k in range(n4)]
+    base_state = [BT.BASE.get(rg4[k], 0.0) for k in range(n4)]
+    thr_ms = delay_h * HOUR_MS
     qv = PC.CAP_4H_WORST.get(c) or 1e12
     w = max(W.get(c, 0.09), 1e-6)
-    thr_ms = delay_h * HOUR_MS
     nav, prev, out = 1.0, None, OrderedDict()
-    n = len(k4s)
-    for i in range(n):
+    started = False
+    for i in range(len(k4s)):
+        # 净值从 START_NAV 当天起算 —— 第一版漏了这一步，把 2018~2020 也算进去，
+        # 控制组直接变成 432 万（正确是 310 万量级），所有比较都失去意义。
+        if not started:
+            if ds[i] < START_NAV:
+                continue
+            started = True
+            prev = None
         k4 = k4s[i]
-        ke = k4 if offs[i] >= thr_ms else (k4 - 1 if k4 > 0 else 0)
-        pv = pv4[ke]
+        # 闸门索引：D=0 时最后一小时就能用当根决策；D>0 时退到上一根
+        kg = k4 if (use_gate and offs[i] >= thr_ms) else (k4 - 1 if k4 > 0 else 0)
+        base = base_state[k4] * (gate[kg] if use_gate else 1.0) * extra[k4]
+        pv = (base + BT.ADD * sig[k4]) * coef[k4] * VT.KAPPA
         if i:
             r = cs[i] / cs[i - 1] - 1
             x = 1 + pv * r
             nav *= x if x > 0 else 0.0
-            sl = pv - base4[ke]
+            sl = pv - base
             if F4 and sl:
                 nav *= (1 - F4 / 4.0 * sl)
             if prev is not None and pv != prev:
@@ -177,21 +205,21 @@ def stat(cv):
 
 
 ONE = {c: [1.0] * len(DATA[c]["b4"]) for c in COINS}
-NOG_NAVS = {c: nav_1h(c, ONE[c], 0) for c in COINS}
+NOG_NAVS = {c: nav_1h(c, ONE[c], 0, use_gate=False) for c in COINS}
 _, CUM_NO, DD_NO = stat(curve(NOG_NAVS))
-print(f"\n对照（不开任何规则，同 1H 口径）：{CUM_NO / 1e4:.0f} 万，回撤 {DD_NO * 100:.1f}%")
+print(f"\n对照（完全不开闸门，同 1H 口径）：{CUM_NO / 1e4:.0f} 万，回撤 {DD_NO * 100:.1f}%")
 
-for nm, extra, ds in (("只 MA50 闸门", ONE, (0, 1, 2, 3, 4, 6)),
-                      ("闸门 + ATR 吊灯 k=1.5", TRAIL, (0, 1, 2, 6))):
+for nm, extra, ds, ug in (("只 MA50 闸门", ONE, (0, 1, 2, 3, 4), True),
+                          ("闸门 + ATR 吊灯 k=1.5", TRAIL, (0, 1, 2), True)):
     print("\n" + "=" * 98)
     print(f"{nm}：延迟 D 小时后执行")
     print("=" * 98)
     print(pad("延迟", 9) + pad("累计", 10) + pad("超额(对无规则)", 16)
-          + pad("保留率", 9) + pad("回撤", 9) + pad("最大可接受", 12))
+          + pad("保留率", 9) + pad("回撤", 9))
     print("-" * 98)
     ex0 = None
     for dh in ds:
-        NAVS = {c: nav_1h(c, extra[c], dh) for c in COINS}
+        NAVS = {c: nav_1h(c, extra[c], dh, use_gate=ug) for c in COINS}
         yr, cum, dd = stat(curve(NAVS))
         ex = cum - CUM_NO
         if ex0 is None:
