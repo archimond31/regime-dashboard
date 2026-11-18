@@ -229,3 +229,6 @@ _tickets.json
 !_exp_delay_1h.py
 # 不入库：_base_gate.json（闸门滞回状态，同 .notify_state.json，只对本机有意义）
 _base_gate.json
+
+# 底仓的功能分解（用户质疑：现货只是开多的通道，凭什么 1.0×）
+!_diag_base_role.py
