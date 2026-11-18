@@ -63,6 +63,9 @@ ASSETS = [
     {"key": "HYPE", "label": "HYPE Hyperliquid","group": "加密", "source": "hyperliquid", "symbol": "HYPE", "unit": "USD/枚"},
     {"key": "CRV",  "label": "CRV Curve",     "group": "加密", "source": "hyperliquid", "symbol": "CRV",  "unit": "USD/枚"},
     {"key": "UNI",  "label": "UNI Uniswap",   "group": "加密", "source": "hyperliquid", "symbol": "UNI",  "unit": "USD/枚"},
+    {"key": "ZEC",  "label": "ZEC Zcash",     "group": "加密", "source": "hyperliquid", "symbol": "ZEC",  "unit": "USD/枚"},
+    {"key": "DOGE", "label": "DOGE 狗狗币",   "group": "加密", "source": "hyperliquid", "symbol": "DOGE", "unit": "USD/枚"},
+    {"key": "NEAR", "label": "NEAR",          "group": "加密", "source": "hyperliquid", "symbol": "NEAR", "unit": "USD/枚"},
     # 商品（Yahoo 期货连续）
     {"key": "GOLD", "label": "黄金 GC 期货",  "group": "商品", "source": "yahoo", "symbol": "GC=F", "unit": "美元/盎司"},
     {"key": "SI",   "label": "白银 SI 期货",  "group": "商品", "source": "yahoo", "symbol": "SI=F", "unit": "美元/盎司"},
