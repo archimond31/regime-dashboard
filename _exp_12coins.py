@@ -18,6 +18,7 @@ import csv
 import io
 import math
 import os
+import re
 import sys
 import zipfile
 from datetime import date
@@ -65,12 +66,19 @@ def load_coin(c):
     return b4, base, pos, trades
 
 
-def worst_4h_qv(sym, months=3):
-    files = sorted(f for f in os.listdir(CACHE) if f.startswith(sym + "-1h-"))
-    if not files:
+def worst_4h_qv(sym, months=3, pct=0.05):
+    """近 months 个**完整月**的 4H 现货成交额，取 pct 分位。
+
+    注意：必须按 YYYY-MM 匹配月归档。早期版本直接 files[-3:] 会命中按日归档
+    （每个文件只有 24 行），等于只测了 3 天。
+    """
+    fs = [f for f in os.listdir(CACHE)
+          if re.fullmatch(sym + r"-1h-\d{4}-\d{2}\.zip", f)]
+    fs = sorted(fs)[-months:]
+    if not fs:
         return None
     buckets = {}
-    for fn in files[-months:]:
+    for fn in fs:
         try:
             with zipfile.ZipFile(os.path.join(CACHE, fn)) as z:
                 with z.open(z.namelist()[0]) as fh:
@@ -81,14 +89,13 @@ def worst_4h_qv(sym, months=3):
                         if ts > 1e14:
                             ts //= 1000
                         q = float(row[7]) if len(row) > 7 else 0.0
-                        buckets[ts // (4 * 3600 * 1000)] = \
-                            buckets.get(ts // (4 * 3600 * 1000), 0.0) + q
+                        buckets[ts // 14400] = buckets.get(ts // 14400, 0.0) + q
         except Exception:                       # noqa: BLE001
             continue
     if not buckets:
         return None
     v = sorted(buckets.values())
-    return v[max(int(len(v) * 0.01), 0)]
+    return v[min(int(len(v) * pct), len(v) - 1)]
 
 
 print("加载 13 币 …", flush=True)
@@ -173,8 +180,12 @@ def portfolio(coins, d0, d1=None):
 W10 = [PC.WEIGHTS[c] for c in OLD10]
 W12 = [1 / 12] * 12
 W11b = [1 / 11] * 11
+# 采纳方案：12 币，AAVE/LINK 单独降到 4%，余额在其余 10 币间等分
+W12C_D = {"AAVE": 0.04, "LINK": 0.04}
+W12C_W = [W12C_D.get(c, (1 - sum(W12C_D.values())) / 10) for c in NEW12]
 ARMS = [("10 币（现状）", OLD10, W10),
-        ("12 币（去CRV+ZEC+DOGE+NEAR）", NEW12, W12),
+        ("12 币等权", NEW12, W12),
+        ("12 币降权 AAVE/LINK 4%", NEW12, W12C_W),
         ("11 币（12 币再去 LINK）", NEW11, W11b)]
 
 print("\n【1】分年度（含成本与 VT60）")
@@ -264,18 +275,22 @@ for d, c, m in sorted(rows, reverse=True):
 top2 = sum(d for d, _c, _m in sorted(rows, reverse=True)[:2]) / tot
 print(f"  合计 {tot:+.1f}pp　前 2 币占 {top2:.0%}")
 
-print("\n【6】敞口与容量（12 币等权 8.33%，VT60 后，50 万本金）")
+print("\n【6】敞口与容量（采纳方案：AAVE/LINK 4%，其余各 9.2%，VT60 后）")
+set_w(NEW12, W12C_W)
 gr = sum(W[c] * sum(abs(p) for p in POSV[c]) / len(POSV[c]) for c in NEW12)
 print(f"  平均总敞口（逐币均值加总）{gr:.3f}×　（10 币现状 0.686×）")
-print(pad("币", 6) + pad("最差4H现货额", 14) + pad("5万", 9) + pad("20万", 9) +
-      pad("50万", 9) + pad("判定(50万)", 11))
-peak_w = (1 / 12) * (PC.BASE_RATIO + PC.ADD_RATIO) * VT.KAPPA
+print(pad("币", 6) + pad("权重", 8) + pad("p5容量", 12) + pad("单笔峰值", 11) +
+      pad("50万占比", 10) + pad("可执行上限", 12) + pad("判定(50万)", 11))
 for c in NEW12:
     qv = QV.get(c)
     if not qv:
         continue
-    cells = [cap * peak_w / qv for cap in (50_000, 200_000, 500_000)]
-    flag = ("超标" if cells[-1] > 0.03 else "需拆单" if cells[-1] > 0.01
-            else "可接受" if cells[-1] > 0.005 else "宽松")
-    print(pad(c, 6) + pad(f"{qv / 1e4:.0f}万", 14) +
-          "".join(pad(f"{x * 100:.2f}%", 9) for x in cells) + pad(flag, 11))
+    w = W[c]
+    peak_frac = w * (PC.BASE_RATIO + PC.ADD_RATIO) * VT.KAPPA   # 相对本金
+    at50 = CAP * peak_frac / qv
+    cap_ok = 0.03 * qv / peak_frac                              # 3% 冲击对应的本金上限
+    flag = ("超标" if at50 > 0.03 else "需拆单" if at50 > 0.01
+            else "可接受" if at50 > 0.005 else "宽松")
+    print(pad(c, 6) + pad(f"{w:.1%}", 8) + pad(f"{qv / 1e4:.0f}万", 12) +
+          pad(f"{CAP * peak_frac / 1e4:.1f}万", 11) + pad(f"{at50:.2%}", 10) +
+          pad(f"{cap_ok / 1e4:.1f}万", 12) + pad(flag, 11))

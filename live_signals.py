@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """实盘信号生成（只出信号，绝不下单）。
 
-品种：BTC ETH SOL BNB XRP **HYPE**(替换 ADA) LINK CRV UNI AAVE
+品种：BTC ETH SOL BNB XRP HYPE LINK UNI AAVE ZEC DOGE NEAR（12 币，2026-11-18 去 CRV）
 
 复刻回测的三层骨架：
   L1  日线 G 状态机定方向与底仓（UP/RANGE → 1.0，DOWN → 0）
@@ -59,9 +59,11 @@ BLOOD_LABEL = {
     "trend_flat_down": "盘整识别↓",
 }
 
-COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "CRV", "UNI", "AAVE"]
+COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "UNI", "AAVE",
+         "ZEC", "DOGE", "NEAR"]
 SECTOR = {"BTC": "储值", "ETH": "L1", "SOL": "L1", "BNB": "交易所", "XRP": "支付",
-          "HYPE": "DEX/永续", "LINK": "预言机", "CRV": "DeFi", "UNI": "DeFi", "AAVE": "DeFi"}
+          "HYPE": "DEX/永续", "LINK": "预言机", "UNI": "DeFi", "AAVE": "DeFi",
+          "ZEC": "隐私币", "DOGE": "meme", "NEAR": "L1"}
 LOOKBACK, ATR_K, MAX_BARS, VOL_Q = BT.LOOKBACK, BT.ATR_K, BT.MAX_BARS, BT.VOL_Q
 
 

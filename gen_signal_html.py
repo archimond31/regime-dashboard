@@ -208,6 +208,7 @@ if errs:
 #   其余时段 → 落后 1 根
 # 这个差值必须显式说出来，否则「动作」列会被读成最新的判断，而它其实是昨天的。
 _bars = sorted({o["bar"] for o in COINS if o.get("bar")})
+_coinline = " / ".join(o["c"] for o in COINS)      # 跟着 COINS 自动走，别再手写死品种表
 _lag = ""
 stale_block = ""
 if len(_bars) > 1:
@@ -238,7 +239,7 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 <h1 style="font-size:20px;margin:6px 0 4px;font-weight:600">加密骨架信号 · {d['asof_bj']}（北京）</h1>
 <div style="font-size:12.5px;color:{MU};line-height:1.8;margin-bottom:16px">
 数据截止：4H 收盘 <b>{d['bar4h']} UTC</b>（未收盘的 K 线已剔除{_lag}）　生成于 {d['asof']}<br>
-品种：BTC / ETH / SOL / BNB / XRP / <b>HYPE</b> / LINK / CRV / UNI / AAVE（HYPE 替换 ADA）
+品种：{_coinline}
 </div>
 
 <table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin:0 -8px 4px">{kpi_html}</table>
