@@ -17,14 +17,19 @@
   2026 年这一刀贡献了 +69.1R，而多头全层只有 +30.2R。
 
 == 权重（2026-11-18 起：12 币，去 CRV 加 ZEC/DOGE/NEAR）==
-  基准 9.2% 等权，两个例外降到 4%：AAVE、LINK。
-  理由全部是**容量**，不是看空：
-    AAVE p5 单根 4H 成交额只有 12.2 万、LINK 21.8 万，是 12 币里最薄的两个；
-    50 万本金下 9.2% 权重的单笔峰值要占掉 30% / 17% 的盘口。
-  降权同时改善收益：回测 12 币等权 6.95× → 降权 7.41×，回撤 -47.3% → -45.6%
-  （_exp_12coins.py）。原因是薄盘口的滑点本来就该少碰。
-  注：50 万本金下 12 币整体已超出单笔 3% 冲击红线，只能靠拆单执行，
-  回测数字已经含这份滑点。各币的「可执行资金上限」见 cap_ceiling()。
+  权重不是固定表，而是**按本金自动切换**（weights_for）：
+    小额（约 ≤3.6 万 U）：12 币等权 9.2%，AAVE/LINK 降到 4%（盘口最薄的两个）。
+    大额：按容量做水位填充，单币权重上限 25%，差额留现金。
+  切换点不拍脑袋，是「小额表的最大单笔冲击是否突破 3%」自动判定的。
+  当前 5000 U 下小额表最大冲击只有 0.41%，所以仍走小额表。
+
+  50 万本金下的实测（_exp_capw.py，含 VT60 与滑点，2022-01 起）：
+    12 币等权            7.09×  回撤 -51.2%  最大冲击 62.5%（9 个币超标）
+    12 币 AAVE/LINK 4%   7.68×  回撤 -49.7%  最大冲击 40.8%（9 个币超标）
+    容量填充 + 单币 25%  7.81×  回撤 -55.9%  最大冲击  3.0%（全部合规）
+    容量填充 + 单币 20%  6.48×  回撤 -49.3%  最大冲击  3.0%（仓位仅 75%）
+    容量填充 无上限      9.78×  回撤 -64.5%  最大冲击  3.0%（但 BTC+HYPE 占 64.6%）
+  取 25% 那一档：收益与大额前的分散表持平，回撤多 6pp，换来完全合规。
 
 == 波动目标化（2026-11-17 起，默认开）==
   上面的权重是「钱的分配」，还不等于「风险的分配」：高波动币年化波动 90~160%、
@@ -44,14 +49,19 @@ CAPITAL = 5000.0          # 起始本金（USDT）；实盘请传入当前实际
 # ---------- 模式 ----------
 ALLOW_SHORT = True        # False = 纯现货（DOWN 时清仓不做空，峰值降到 1.0×）
 
-# ---------- 权重（占总权益，合计 1.00）----------
-WEIGHTS = {
+# ---------- 权重 ----------
+# 小额表：容量不是约束时用 —— 尽量分散，只对最薄的两个盘口降权。
+WEIGHTS_SMALL = {
     "BTC": 0.092, "ETH": 0.092, "SOL": 0.092,
     "BNB": 0.092, "XRP": 0.092, "UNI": 0.092,
     "HYPE": 0.092, "ZEC": 0.092, "DOGE": 0.092,
     "NEAR": 0.092,
     "AAVE": 0.04, "LINK": 0.04,
 }
+
+# 容量约束参数（大额表用）
+MAX_IMPACT = 0.03         # 单笔冲击红线：超过最差 4H 额（p5）的 3% 判超标
+SINGLE_CAP = 0.25         # 单币权重上限：防止容量填充把仓位全堆到 BTC/HYPE 身上
 
 # ---------- 敞口结构（相对单币权重）----------
 BASE_RATIO = 1.0          # 底仓：UP/RANGE 时持有
@@ -77,6 +87,67 @@ MIN_NOTIONAL = 5.0
 MIN_POSITION = 50.0
 
 
+def _vt_scale():
+    """VT 的典型系数 κ。容量按它算，不用极端峰值 2.44 —— VT 本就会在高波动时缩仓，
+    再用峰值等于对同一件事惩罚两次。极端峰值出现在少数日子，靠拆单处理。"""
+    import vol_target as _vt
+    return _vt.KAPPA
+
+
+def peak_weight(w, vt_scale=None):
+    """权重 w 在「满峰值 + 典型波动系数」下的敞口，相对本金。"""
+    s = _vt_scale() if vt_scale is None else vt_scale
+    return w * (BASE_RATIO + ADD_RATIO) * s
+
+
+def max_impact_of(weights, capital):
+    """该权重表在给定本金下的最大单笔冲击占比。"""
+    best = 0.0
+    for c, w in weights.items():
+        qv = CAP_4H_WORST.get(c)
+        if qv and w > 0:
+            best = max(best, capital * peak_weight(w) / qv)
+    return best
+
+
+def capacity_weights(capital, max_impact=MAX_IMPACT, single_cap=SINGLE_CAP):
+    """容量约束下的权重：等权起步 → 超限的币封顶 → 余额在未封顶的币之间续分。
+
+    Σ 可能小于 1（容量不够满仓），差额作为现金 —— 不做归一化，
+    因为归一化会把每个币重新顶回超标区，等于自欺欺人。
+    """
+    coins = list(CAP_4H_WORST)
+    s = _vt_scale()
+    unit = peak_weight(1.0, s)
+    cap = {c: min(single_cap, max_impact * CAP_4H_WORST[c] / (capital * unit))
+           for c in coins}
+    w = {c: 1.0 / len(coins) for c in coins}
+    for _ in range(100):
+        over = {c for c in coins if w[c] >= cap[c] - 1e-12}
+        if not over:
+            return w
+        rest = [c for c in coins if c not in over]
+        free = 1.0 - sum(cap[c] for c in over)
+        if not rest or free <= 1e-12:
+            return {c: cap[c] for c in coins}
+        new = {c: (cap[c] if c in over else min(free / len(rest), cap[c]))
+               for c in coins}
+        if max(abs(new[c] - w[c]) for c in coins) < 1e-12:
+            return new
+        w = new
+    return w
+
+
+def weights_for(capital):
+    """按本金选权重表：小额分散、大额受容量约束。切换点自动判定，不写死。"""
+    if max_impact_of(WEIGHTS_SMALL, capital) <= MAX_IMPACT:
+        return dict(WEIGHTS_SMALL)
+    return capacity_weights(capital)
+
+
+WEIGHTS = weights_for(CAPITAL)      # 当前本金的生效权重
+
+
 def target(capital, coin, state, adding=False, closing=False, scale=1.0):
     """该币当前应持有的**名义金额**（USDT，负数=空头），以及一句人话说明。
 
@@ -86,7 +157,7 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0):
     scale:   波动目标化系数（vol_target.py 给出，含 κ）。1.0 = 不缩放。
              只缩金额、不改方向 —— 所以 DOWN 的空头同样会被缩。
     """
-    w = WEIGHTS.get(coin)
+    w = weights_for(capital).get(coin)
     if w is None:
         return 0.0, f"{coin} 不在配置表里"
     base = capital * w * BASE_RATIO * scale
@@ -111,7 +182,7 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0):
 
 def split(capital, coin, scale=1.0):
     """把单币额度拆成 (底仓, 加仓层, 空头峰值)。用于下单时预留资金。"""
-    w = WEIGHTS.get(coin, 0.0)
+    w = weights_for(capital).get(coin, 0.0)
     base = capital * w * BASE_RATIO * scale
     add = capital * w * ADD_RATIO * scale
     return base, add, (-add if ALLOW_SHORT else 0.0)
@@ -145,15 +216,15 @@ def orders_needed(amount, coin):
     return max(1, math.ceil(amount / (worst * 0.01)))
 
 
-def cap_ceiling(coin, max_impact=0.03, vt=True):
-    """该币在当前权重下，能把「单笔冲击 ≤ max_impact」的最大本金（USDT）。
+def cap_ceiling(coin, capital=None, max_impact=0.03, vt=True):
+    """该币在该本金对应权重下，能把「单笔冲击 ≤ max_impact」的最大本金（USDT）。
 
-    峰值敞口 = 本金 × w × (BASE+ADD) × 波动系数上限。
-    开了 VT 时系数上限是 HI×κ ≈ 2.44，所以上限比关掉时低 2.44 倍。
-    超过这个本金不是不能做，而是要拆单 + 分批成交，滑点会明显变差。
+    注意这里用**极端峰值系数**（HI×κ≈2.44），比 weights_for 定容量时的典型 κ 更严，
+    所以它是「保守参考」而不是「配置依据」。超过它就要拆单 + 分批成交。
     """
+    cap0 = capital if capital is not None else CAPITAL
     worst = CAP_4H_WORST.get(coin)
-    w = WEIGHTS.get(coin, 0.0)
+    w = weights_for(cap0).get(coin, 0.0)
     if not worst or w <= 0:
         return 0.0
     peak = w * (BASE_RATIO + ADD_RATIO)
@@ -180,7 +251,7 @@ def table(capital=None):
     """配置全表，供终端 / HTML / 邮件复用。"""
     cap = capital if capital is not None else CAPITAL
     rows = []
-    for c, w in sorted(WEIGHTS.items(), key=lambda kv: -kv[1]):
+    for c, w in sorted(weights_for(cap).items(), key=lambda kv: -kv[1]):
         base, add, short = split(cap, c)
         peak = base + add
         imp, flag = cap_check(peak, c)

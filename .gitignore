@@ -203,3 +203,6 @@ _tickets.json
 # 12 币组合评估（去 CRV，加 ZEC/DOGE/NEAR）
 !_exp_12coins.py
 !_exp12.log
+# 容量约束权重评估
+!_exp_capw.py
+!_capw.log
