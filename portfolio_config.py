@@ -167,19 +167,23 @@ def weights_for(capital):
 WEIGHTS = weights_for(CAPITAL)      # 当前本金的生效权重
 
 
-def target(capital, coin, state, adding=False, closing=False, scale=1.0):
+def target(capital, coin, state, adding=False, closing=False, scale=1.0,
+           base_gate=1.0):
     """该币当前应持有的**名义金额**（USDT，负数=空头），以及一句人话说明。
 
-    state:   "UP" / "RANGE" / "DOWN"（日线 G 状态机）
-    adding:  4H 已突破前 20 根极值，可以上到峰值
-    closing: 日线已翻转、与原仓位方向相反 —— 此时目标是 0（先平，不反手）
-    scale:   波动目标化系数（vol_target.py 给出，含 κ）。1.0 = 不缩放。
-             只缩金额、不改方向 —— 所以 DOWN 的空头同样会被缩。
+    state:     "UP" / "RANGE" / "DOWN"（日线 G 状态机）
+    adding:    4H 已突破前 20 根极值，可以上到峰值
+    closing:   日线已翻转、与原仓位方向相反 —— 此时目标是 0（先平，不反手）
+    scale:     波动目标化系数（vol_target.py 给出，含 κ）。1.0 = 不缩放。
+               只缩金额、不改方向 —— 所以 DOWN 的空头同样会被缩。
+    base_gate: 底仓闸门（base_gate.py 给出）。只作用于**底仓**，不影响加仓层。
+               1.0 = 全额；0.25 = 价格已跌破 MA50，底仓只留 25%。
+               加仓层不动，是因为它由 4H 突破触发，与日线趋势过滤无关。
     """
     w = weights_for(capital).get(coin)
     if w is None:
         return 0.0, f"{coin} 不在配置表里"
-    base = capital * w * BASE_RATIO * scale
+    base = capital * w * BASE_RATIO * scale * base_gate
     add = capital * w * ADD_RATIO * scale
 
     if closing:
@@ -187,10 +191,13 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0):
 
     if state == "UP":
         return (base + add if adding else base,
-                "日线 UP｜" + ("4H 已突破 → 多头满峰值" if adding else "未突破 → 底仓做多"))
+                "日线 UP｜" + ("4H 已突破 → 多头满峰值" if adding else
+                               ("未突破 → 底仓做多" if base_gate >= 1.0
+                                else "未突破 → 底仓打折 %d%%" % round(base_gate * 100))))
     if state == "RANGE":
         # 回测里 RANGE 不进新仓（signals 只处理 UP/DOWN），底仓照持
-        return (base, "日线 RANGE｜底仓持有，不开新仓")
+        return (base, "日线 RANGE｜" + ("底仓持有，不开新仓" if base_gate >= 1.0
+                                       else "底仓打折 %d%%，不开新仓" % round(base_gate * 100)))
     # DOWN
     if not ALLOW_SHORT:
         return 0.0, "日线 DOWN → 清仓（现货模式不做空）"
@@ -199,10 +206,10 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0):
     return (0.0, "日线 DOWN｜未跌破 → 空仓等信号")
 
 
-def split(capital, coin, scale=1.0):
+def split(capital, coin, scale=1.0, base_gate=1.0):
     """把单币额度拆成 (底仓, 加仓层, 空头峰值)。用于下单时预留资金。"""
     w = weights_for(capital).get(coin, 0.0)
-    base = capital * w * BASE_RATIO * scale
+    base = capital * w * BASE_RATIO * scale * base_gate
     add = capital * w * ADD_RATIO * scale
     return base, add, (-add if ALLOW_SHORT else 0.0)
 

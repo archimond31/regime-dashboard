@@ -95,6 +95,21 @@ BLOCK_INIT = os.environ.get("SKEL_BLOCK_INIT", "1") == "1"
 _BLOOD_CACHE = {}
 
 
+def base_series(b4, d1, rg4):
+    """底仓系数序列 = 状态基础值 × 底仓闸门。**回测与实盘的唯一入口**。
+
+    · 状态基础值：UP/RANGE = 1.0，DOWN = 0.0（BASE 表）
+    · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，SKEL_BASEGATE=0 可关）
+
+    实盘 live_signals.analyze() 走的是同一个 base_gate.next_gate()，
+    只是它只需要最后一根的值，这里要整条序列。
+    两者若出现分歧，以本函数的逐 bar 结果为准 —— 回测可复现，实盘可对照。
+    """
+    import base_gate as BG
+    gate = BG.series(b4, d1, rg4)
+    return [BASE.get(rg4[k], 0.0) * gate[k] for k in range(len(rg4))]
+
+
 def _daily_closes(b4):
     """4H → 日线收盘序列（只保留状态机需要的最小字段）。
 

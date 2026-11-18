@@ -34,6 +34,7 @@ from test_regime_fit import agg4h
 from _proto_4h import atr_wilder
 from strategy_1h_rsi import regime_series, regime_and_blood, align_regime_safe
 import bt_skeleton as BT
+import base_gate as BG
 import portfolio_config as PC
 import vol_target as VT
 
@@ -115,7 +116,7 @@ def load_coin(c, now):
     return b4, d1
 
 
-def analyze(c, now):
+def analyze(c, now, prev_gate=None):
     b4, d1 = load_coin(c, now)
     n = len(b4)
     reg_map, blood_map = regime_and_blood(d1)
@@ -244,13 +245,32 @@ def analyze(c, now):
     o["vt"] = dict(on=VT.ENABLED, lb=VT.LB, sigma=sg, coef=cf,
                    kappa=VT.KAPPA, scale=scale)
 
+    # ---- 底仓闸门：当前 4H 收盘 vs 前一日日线 MA50 ----
+    # 只作用于底仓，不影响加仓层（加仓层由 4H 突破触发）。
+    # DOWN 时重置滞回状态：底仓本来就是 0，闸门值没有意义；
+    # 不重置会把上一轮的残留带进下一段 UP。
+    gma = BG.ma_lookup(d1)(last["date"])
+    if state == "DOWN":
+        gate_val = 1.0
+    else:
+        gate_val = BG.next_gate(px, gma, prev_gate)
+    o["base_gate"] = gate_val
+    # 落盘的滞回状态：DOWN 时写 None（= 重置），与 base_gate.series() 的口径一致。
+    # 若写 1.0，下一段 UP/RANGE 的第一根就会走「原先是全额」分支、要求跌破 MA×0.99 才砍，
+    # 而回测（series 里 cur=None）是「跌破 MA×1.01 就砍」—— 两者会在均线附近分歧。
+    o["gate_state"] = None if state == "DOWN" else gate_val
+    o["gate_ma"] = gma
+    o["gate_note"] = BG.describe(gate_val, state)
+
     tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing,
-                         scale=scale)
+                         scale=scale, base_gate=gate_val)
     # 被闸门拦住时 target 恒为 0，但原因不是「没跌破」，得说清楚
     if o.get("gate_blocked") and tgt == 0 and not holding:
         why = f"波动闸门拦截（分位 {pctv * 100:.0f}% > {VOL_Q * 100:.0f}%）→ 不开新仓"
     if VT.ENABLED:
         why = f"{why}｜{VT.describe(cf, sg)}"
+    if BG.ENABLED and state != "DOWN":
+        why = f"{why}｜{o['gate_note']}"
     o["target"] = round(tgt)
     o["side"] = "多" if tgt > 0 else ("空" if tgt < 0 else "—")
     o["target_note"] = why
@@ -283,15 +303,45 @@ def _save_bc(d):
         pass
 
 
+GATE_STATE = "_base_gate.json"
+
+
+def _load_gate():
+    """底仓闸门的滞回状态：{币: 上一次的闸门值(1.0 / 0.25)}。
+
+    滞回需要「上一次的取值」才能判「是否越过 ±1% 的带子」。没有它也能跑
+    （首次按当前价 vs MA 直接判），但同一根 4H 反复重跑会得到不同结果，
+    所以必须落盘。
+    """
+    try:
+        with open(GATE_STATE, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_gate(d):
+    try:
+        with open(GATE_STATE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
+    except Exception:
+        pass
+
+
 def main():
     now = _now_utc()
+    gs = _load_gate()
     rows, errs = [], []
     for c in COINS:
         try:
-            rows.append(analyze(c, now))
+            rows.append(analyze(c, now, prev_gate=gs.get(c)))
         except Exception as e:
             errs.append({"c": c, "err": f"{type(e).__name__}: {e}"})
             print(f"  {c:<5} 失败 {errs[-1]['err']}")
+    # 只更新成功的币；失败的保留旧状态，避免下一根从零开始判
+    gs.update({o["c"]: o.get("gate_state") for o in rows})
+    _save_gate(gs)
 
     # ---- 底仓动作提示（建 / 清）----
     # 底仓的进出此前只体现为 target 数字从正变零或反过来 ——
@@ -306,9 +356,11 @@ def main():
         if not rs:
             continue
         st = o["state"]
-        # 底仓金额必须和 target() 用同一个 scale，否则提示的 U 数会和表里不一致
+        # 底仓金额必须和 target() 用同一个 scale 与 base_gate，
+        # 否则提示的 U 数会和表里不一致
+        bg = o.get("base_gate", 1.0)
         amt = round(PC.CAPITAL * PC.WEIGHTS.get(o["c"], 0.0) * PC.BASE_RATIO
-                    * (o.get("vt") or {}).get("scale", 1.0))
+                    * (o.get("vt") or {}).get("scale", 1.0) * bg)
         if st == "DOWN":
             act = "清底仓"
             tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")
@@ -316,7 +368,9 @@ def main():
             note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
         elif st in ("UP", "RANGE") and not o.get("triggered"):
             act = "建底仓"
-            note = f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场（4H 突破后再加到峰值）"
+            gtail = ("" if bg >= 1.0
+                     else f"（价格已在 MA{BG.GATE_MA} 下方，只建 {round(bg * 100)}%）")
+            note = f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场{gtail}（4H 突破后再加到峰值）"
         else:
             continue                      # 已触发 = action 已是「开仓」，不重复
         key = act + ":" + rs
@@ -345,6 +399,8 @@ def main():
            "vt": {"on": VT.ENABLED, "lb": VT.LB, "target": VT.TARGET,
                   "lo": VT.LO, "hi": VT.HI, "kappa": VT.KAPPA,
                   "rebal": VT.REBAL_DAYS},
+           "basegate": {"on": BG.ENABLED, "ma": BG.GATE_MA, "cv": BG.GATE_CV,
+                        "hyst": BG.GATE_HYST},
            "coins": rows, "urgent": [o["c"] for o in urgent], "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)

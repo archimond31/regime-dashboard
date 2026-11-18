@@ -209,3 +209,11 @@ _tickets.json
 # 50 万本金逐年表现 + 口径 A 对照 + 容量自适应修正（2026-11-18）
 !_exp_yearly.py
 !_yearly.log
+# 风险预算诊断（证明波动率尺子测不到真实风险：敞口峰值 / 逐年波动-回撤失配）
+!_diag_risk.py
+# 底仓趋势闸门（P0-1）：生产模块 + 对照实验 + 落地一致性核验
+!base_gate.py
+!_exp_base.py
+!_verify_gate.py
+# 不入库：_base_gate.json（闸门滞回状态，同 .notify_state.json，只对本机有意义）
+_base_gate.json

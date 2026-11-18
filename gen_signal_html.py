@@ -143,6 +143,12 @@ for o in COINS:
     _lock = o.get("blood_locked")
     st_tail = ('<div style="font-size:10px;color:#d32f2f;margin-top:2px;line-height:1.2">'
                '⚠ 初始化<br>不可纠错</div>' if _lock else "")
+    # 底仓闸门：1.00 = 全额，0.25 = 价格已跌破 MA50 只留 25%。
+    # 只影响底仓，加仓层由 4H 突破决定，与它无关。
+    _bg = o.get("base_gate", 1.0)
+    bgtxt = ("—" if st == "DOWN"
+             else ("100%" if _bg >= 1.0 else f"{_bg * 100:.0f}%"))
+    bgcol = "#2e7d32" if _bg < 1.0 else MU
     rows += (
         f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px"><b>{o["c"]}</b>'
         f'<span style="color:{MU};font-size:11px"> {o["sector"]}</span></td>'
@@ -154,6 +160,8 @@ for o in COINS:
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{gcol}">{gtxt}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
         f'color:{vcol};font-weight:{"600" if abs(_sc-1) > 0.05 else "400"}">{vtxt}</td>'
+        f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
+        f'color:{bgcol};font-weight:{"600" if _bg < 1.0 else "400"}">{bgtxt}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{MU}">{px(o["hi20"])}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{MU}">{px(o["lo20"])}</td>'
         f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
@@ -162,11 +170,11 @@ for o in COINS:
         f'color:{ac};font-weight:{"600" if act in ("开仓", "闸门拦截") else "400"}">{act}</td></tr>')
 
 all_block = (
-    f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">全部 10 个品种</h2>'
+    f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">全部 {len(COINS)} 个品种</h2>'
     f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
     f'<tr style="background:#f5f5f5">'
     + "".join(f'<th style="padding:7px 9px;text-align:right;font-size:12px;color:{MU};font-weight:500">{h}</th>'
-              for h in ["品种", "日线状态", "现价", "ATR%", "波动分位", "仓位系数",
+              for h in ["品种", "日线状态", "现价", "ATR%", "波动分位", "仓位系数", "底仓",
                         "20根上轨", "20根下轨", "距触发", "动作"])
     + f'</tr>{rows}</table>'
     f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
@@ -176,6 +184,9 @@ all_block = (
     f'<span style="color:#c62828">红 = 加仓</span>（该币波动低，同样的钱承担的风险更小）、'
     f'<span style="color:#2e7d32">绿 = 减仓</span>（波动高）。'
     f'系数已含 κ，平均总敞口与不加时相同；只改金额、不改方向，空头同样被缩。<br>'
+    f'<b>「底仓」</b>：底仓闸门。价格在 MA50 上方 = 100%，跌破 = 25%，'
+    f'中间 1% 滞回带防抖动。只作用于底仓，加仓层由 4H 突破决定、不受影响。'
+    f'DOWN 时底仓本来就是 0，显示「—」。<br>'
     f'<b>「⚠ 初始化」</b>：这段状态来自状态机刚预热完的初始均线判断，'
     f'既不受 MA60 纠错、也不受「背离失败」约束，只有「RSI 破 30 再升破」一个出口——'
     f'上涨行情中该出口永不触发，会长时间锁死。此段不开新仓，已有持仓照常按翻转平。</div>')
