@@ -262,6 +262,19 @@ def analyze(c, now, prev_gate=None):
     o["gate_ma"] = gma
     o["gate_note"] = BG.describe(gate_val, state)
 
+    # 底仓的两个金额口径，给工单（ticket.py）用：
+    #   base_full = 不打折的底仓额度（含 VT scale，不含闸门）
+    #   base_held = 按闸门打折后**应该在场**的底仓金额
+    # 为什么要 base_held：状态翻 DOWN 时 target 被强制归零，拿不到「要平多少」；
+    # 而如果闸门把底仓砍到 25%，手上只有 25%，按全额去清就是 4 倍超卖。
+    # DOWN 时闸门值强制 1.0（无意义），真实在仓比例只能取上一轮的 prev_gate。
+    # 局限：只在「翻 DOWN 的第一根」准 —— 之后 prev_gate 已被写成 None，回落到全额。
+    # 但清底仓提示与工单都只在第一根生成（按 regime_start 去重），所以不影响指令。
+    _bw = PC.CAPITAL * PC.WEIGHTS.get(c, 0.0) * PC.BASE_RATIO * scale
+    o["base_full"] = round(_bw)
+    o["base_held"] = round(_bw * (gate_val if state != "DOWN"
+                                  else (prev_gate if prev_gate is not None else 1.0)))
+
     tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing,
                          scale=scale, base_gate=gate_val)
     # 被闸门拦住时 target 恒为 0，但原因不是「没跌破」，得说清楚
@@ -356,11 +369,11 @@ def main():
         if not rs:
             continue
         st = o["state"]
-        # 底仓金额必须和 target() 用同一个 scale 与 base_gate，
-        # 否则提示的 U 数会和表里不一致
+        # 底仓金额直接取 analyze() 算好的 base_held —— 它已经含 scale 与底仓闸门。
+        # 「清底仓」要平掉的是**手上真实持有的量**，不是打折前的额度：
+        # 闸门把底仓砍到 25% 时，按全额去清就是 4 倍超卖。
         bg = o.get("base_gate", 1.0)
-        amt = round(PC.CAPITAL * PC.WEIGHTS.get(o["c"], 0.0) * PC.BASE_RATIO
-                    * (o.get("vt") or {}).get("scale", 1.0) * bg)
+        amt = o.get("base_held") or 0
         if st == "DOWN":
             act = "清底仓"
             tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")

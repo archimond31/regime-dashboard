@@ -94,8 +94,16 @@ def _notional(o):
     """
     w = PC.WEIGHTS.get(o["c"], 0.0)
     a = o["action"]
-    if a in ("清底仓", "建底仓"):
-        return round(PC.CAPITAL * w * PC.BASE_RATIO)
+    if a == "建底仓":
+        # 买多少 = 信号表里的 target（已含 VT scale 与底仓闸门）。
+        # 旧写法 CAPITAL*w*BASE_RATIO 两样都不含：闸门把底仓砍到 25% 时会虚报 4 倍，
+        # 人照着单子下单就买多了。
+        return round(o.get("target") or o.get("base_held")
+                     or PC.CAPITAL * w * PC.BASE_RATIO)
+    if a == "清底仓":
+        # 卖多少 = **手上真实持有**的底仓。信号里的 base_held 已按上一轮的闸门打过折，
+        # 不能拿全额去平 —— 闸门在仓时那是超卖。
+        return round(o.get("base_held") or PC.CAPITAL * w * PC.BASE_RATIO)
     if a in ("平仓", "止损临近", "即将到期"):
         p = o.get("pos") or {}
         k = (PC.BASE_RATIO + PC.ADD_RATIO) if p.get("regime") == "UP" else PC.ADD_RATIO
@@ -337,7 +345,7 @@ def render():
         if (i["kind"] in ("开仓", "建底仓") and cur is not None and i["notional"]
                 and abs(cur - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
             drift = (f'<div style="font-size:11px;color:#ef6c00;margin-top:2px">'
-                     f'现信号 {cur:,.0f} U（波动系数已变）</div>')
+                     f'⚠ 现信号 {cur:,.0f} U（波动系数/底仓闸门已变，按现信号下）</div>')
         px = i["ref_px"]
         pxs = (f"{px:,.4f}" if px is not None and abs(px) < 10
                else (f"{px:,.2f}" if px is not None else "—"))
