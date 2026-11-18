@@ -195,3 +195,5 @@ _tickets.json
 !05_波动目标化_VT60.md
 # 20 币扩容评估（组合口径，含 VT60）
 !_exp_20coins.py
+# 11 币决策评估（去 CRV + DOGE + NEAR）
+!_exp_11coins.py
