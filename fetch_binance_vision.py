@@ -66,6 +66,7 @@ SYMBOLS = {
     "DOT": "DOTUSDT",       # 互操作/平行链
     "NEAR": "NEARUSDT",     # 新 L1
     "SAND": "SANDUSDT",     # 游戏/元宇宙
+    "ZEC": "ZECUSDT",       # 隐私币（2026-11 评估加入）
 }
 
 # 各品种在 Binance 现货的上线月，用来缩短探测范围
@@ -91,6 +92,7 @@ LISTED_FROM = {
     "DOTUSDT": (2020, 6),
     "NEARUSDT": (2020, 8),
     "SANDUSDT": (2020, 6),
+    "ZECUSDT": (2017, 8),
 }
 
 _CACHE_TAIL = {}

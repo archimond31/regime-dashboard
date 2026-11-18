@@ -200,3 +200,6 @@ _tickets.json
 # 年度轮动 10 币评估
 !_exp_rot10.py
 !_rot10.log
+# 12 币组合评估（去 CRV，加 ZEC/DOGE/NEAR）
+!_exp_12coins.py
+!_exp12.log
