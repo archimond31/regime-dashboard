@@ -95,11 +95,15 @@ def _notional(o):
     w = PC.WEIGHTS.get(o["c"], 0.0)
     a = o["action"]
     if a == "建底仓":
-        # 买多少 = 信号表里的 target（已含 VT scale 与底仓闸门）。
-        # 旧写法 CAPITAL*w*BASE_RATIO 两样都不含：闸门把底仓砍到 25% 时会虚报 4 倍，
+        # 买多少 = 信号表里的 target（已含 VT scale、底仓闸门与 RANGE 来路折扣）。
+        # 旧写法 CAPITAL*w*BASE_RATIO 三样都不含：闸门把底仓砍到 25% 时会虚报 4 倍，
         # 人照着单子下单就买多了。
-        return round(o.get("target") or o.get("base_held")
-                     or PC.CAPITAL * w * PC.BASE_RATIO)
+        # 显式判 >0 而不是用 `or`：RANGE 来路 DOWN 时 target 恰好是 0，
+        # `or` 会把它吞掉、回落到 base_held（全额），变成反向的错误信号。
+        t = o.get("target")
+        if t is not None and t > 0:
+            return round(t)
+        return round(o.get("base_held") or PC.CAPITAL * w * PC.BASE_RATIO)
     if a == "清底仓":
         # 卖多少 = **手上真实持有**的底仓。信号里的 base_held 已按上一轮的闸门打过折，
         # 不能拿全额去平 —— 闸门在仓时那是超卖。
@@ -174,6 +178,10 @@ def sync(sig=None):
     items = d["items"]
 
     state_of = {o["c"]: o.get("state") for o in sig["coins"]}
+    # 目标名义（含空头为负）。作废判断现在按 target 走而不是按状态 ——
+    # 因为 2026-11-19 起 RANGE 段也可能要求「底仓归零」（来路 DOWN），
+    # 只看 state != DOWN 会把这类清仓单当天误作废掉。
+    target_of = {o["c"]: (o.get("target") or 0) for o in sig["coins"]}
     live = {}
     for o in sig["coins"]:
         if o.get("action") not in TTL:
@@ -217,13 +225,13 @@ def sync(sig=None):
             continue
         note = None
         if i["kind"] in ("清底仓", "建底仓"):
-            st = state_of.get(i["coin"])
-            if st is None:
+            t = target_of.get(i["coin"])
+            if t is None:
                 continue                  # 这一轮没取到该币，先不动
-            if i["kind"] == "清底仓" and st != "DOWN":
-                note = f"日线已回到 {st}，不必再清底仓"
-            elif i["kind"] == "建底仓" and st == "DOWN":
-                note = "日线又转 DOWN，不必建底仓"
+            if i["kind"] == "清底仓" and t > 0:
+                note = f"当前目标 {t:,.0f} U > 0，不必再清底仓"
+            elif i["kind"] == "建底仓" and t <= 0:
+                note = "当前目标为 0，不必建底仓"
         else:
             if i["key"] not in live:
                 note = "行情已变化，这条动作不再需要执行"

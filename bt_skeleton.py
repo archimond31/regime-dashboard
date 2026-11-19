@@ -95,22 +95,55 @@ BLOCK_INIT = os.environ.get("SKEL_BLOCK_INIT", "1") == "1"
 _BLOOD_CACHE = {}
 
 
+def range_ratio_series(rg4):
+    """逐 bar 的「RANGE 来路折扣」系数。**与闸门正交**，两者相乘。
+
+    RANGE 段的底仓不再一律 1.0，而是看**进入 RANGE 之前那段是什么状态**：
+      UP→RANGE   保持 1.0（实测段内平均 +8.78%，赢面 47% 但赢时 +25.6%）
+      DOWN→RANGE 打 0   （实测段内平均 +0.50%，零期望的纯波动）
+    配置见 portfolio_config.RANGE_RATIO_BY_SRC。
+
+    **无前视**：来路取 rg4[k-1]，是 bar k 开始前就已知的历史事实，
+    所以 out[k] 直接作用于 bar k 的收益是对的，不需要左移一格。
+    （_exp_range_src.py 实测：原样 vs 左移一格只差 2~9 万，属噪声级。）
+
+    注意 RANGE 段内部必须**沿用进入时的来路**，不能每根重新看前一根 ——
+    否则第二根起前一根是 RANGE，来路就丢了，整段会退化成 1.0。
+    """
+    import portfolio_config as PC
+    out = [1.0] * len(rg4)
+    src = None
+    for k in range(len(rg4)):
+        s = rg4[k]
+        if s == "RANGE":
+            if src is None:                       # 段的第一根：记录来路
+                prev = rg4[k - 1] if k > 0 else None
+                src = prev if prev in ("UP", "DOWN") else None
+            out[k] = PC.RANGE_RATIO_BY_SRC.get(src, PC.RANGE_RATIO_DEFAULT)
+        else:
+            src = None                            # 离开 RANGE 就复位
+    return out
+
+
 def base_series(b4, d1, rg4):
-    """底仓系数序列 = 状态基础值 × 底仓闸门。**回测与实盘的唯一入口**。
+    """底仓系数序列 = 状态基础值 × 底仓闸门 × RANGE 来路折扣。**回测与实盘的唯一入口**。
 
     · 状态基础值：UP/RANGE = 1.0，DOWN = 0.0（BASE 表）
     · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，默认已关闭）
+    · RANGE 来路折扣：DOWN→RANGE 打 0（portfolio_config.RANGE_RATIO_BY_SRC）
 
     下标语义：返回值 k 是「在 bar k 期间生效」的系数，即乘在 r[k]=close[k]/close[k-1] 上。
     闸门内部已经左移一格（gate 是拿 close[k] 算的，只能作用于 bar k+1），
     这一步不做就是前视 —— 2026-11-18 为此把整条「底仓退出」结论推翻过一次，见 base_gate.py。
+    来路折扣不需要左移（只用 rg4[k-1]），所以两者可以安全相乘。
 
     实盘 live_signals.analyze() 走的是同一个 base_gate.next_gate()，
     只是它只需要最后一根的值（下一根才生效，天然无前视）。
     """
     import base_gate as BG
     gate = BG.series(b4, d1, rg4)
-    return [BASE.get(rg4[k], 0.0) * gate[k] for k in range(len(rg4))]
+    rr = range_ratio_series(rg4)
+    return [BASE.get(rg4[k], 0.0) * gate[k] * rr[k] for k in range(len(rg4))]
 
 
 def _daily_closes(b4):
@@ -292,7 +325,10 @@ def build(coin):
     sig, trades = signals(b4, rg4, atr, vol_q=VOL_Q, coin=coin)
 
     n = len(b4)
-    base = [BASE.get(rg4[k], 0.0) for k in range(n)]
+    # 底仓 = 状态基础值 × RANGE 来路折扣（闸门已关闭，这里不叠加；
+    # 若将来开启闸门，必须改用 base_series(b4, d1, rg4) 以免两处口径分叉）
+    rr = range_ratio_series(rg4)
+    base = [BASE.get(rg4[k], 0.0) * rr[k] for k in range(n)]
     pos = [base[k] + ADD * sig[k] for k in range(n)]
 
     nav = nav_base = nav_bh = 1.0
@@ -492,7 +528,10 @@ def main():
         b4, rg4, trades, curve, pos = build(c)
         st = tstats(trades)
         curves[c] = curve
-        ALT[c] = (b4, pos, [BASE.get(rg4[k], 0.0) for k in range(len(rg4))])
+        # ALT 用于「底仓也挂永续」的执行层对照，需要与 build() 完全同口径的 base
+        rr4 = range_ratio_series(rg4)
+        ALT[c] = (b4, pos,
+                  [BASE.get(rg4[k], 0.0) * rr4[k] for k in range(len(rg4))])
         m = met(curve, 1)
         mb = met(curve, 2)
         mbh = met(curve, 3)

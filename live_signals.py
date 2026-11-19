@@ -151,6 +151,17 @@ def analyze(c, now, prev_gate=None):
         k_seg -= 1
     o["regime_start"] = b4[min(k_seg, len(b4) - 1)]["date"]
 
+    # RANGE 段的「来路」：进入 RANGE 之前那段是什么。
+    # 用于 portfolio_config.RANGE_RATIO_BY_SRC —— DOWN→RANGE 的底仓打 0。
+    # 与回测 bt_skeleton.range_ratio_series() 完全同源（都取 rg4[k_seg-1]），
+    # 且只依赖历史 bar，无前视。
+    prev_st = rg4[k_seg - 1] if k_seg > 0 else None
+    o["range_src"] = (prev_st if state == "RANGE" and prev_st in ("UP", "DOWN")
+                      else None)
+    o["range_ratio"] = (PC.RANGE_RATIO_BY_SRC.get(o["range_src"],
+                                                  PC.RANGE_RATIO_DEFAULT)
+                        if state == "RANGE" else 1.0)
+
     # 血统：这段状态是怎么来的，以及能不能被纠错。
     # init 血统 = 不可纠错，实盘在 BT.BLOCK_INIT 打开时不据此开新仓。
     o["blood"] = blood4[-1] if blood4 else None
@@ -276,7 +287,8 @@ def analyze(c, now, prev_gate=None):
                                   else (prev_gate if prev_gate is not None else 1.0)))
 
     tgt, why = PC.target(PC.CAPITAL, c, state, adding=at_peak, closing=closing,
-                         scale=scale, base_gate=gate_val)
+                         scale=scale, base_gate=gate_val,
+                         range_src=o.get("range_src"))
     # 被闸门拦住时 target 恒为 0，但原因不是「没跌破」，得说清楚
     if o.get("gate_blocked") and tgt == 0 and not holding:
         why = f"波动闸门拦截（分位 {pctv * 100:.0f}% > {VOL_Q * 100:.0f}%）→ 不开新仓"
@@ -380,10 +392,21 @@ def main():
                     else "；做空要等 4H 收盘跌破前 20 根低点")
             note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
         elif st in ("UP", "RANGE") and not o.get("triggered"):
-            act = "建底仓"
-            gtail = ("" if bg >= 1.0
-                     else f"（价格已在 MA{BG.GATE_MA} 下方，只建 {round(bg * 100)}%）")
-            note = f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场{gtail}（4H 突破后再加到峰值）"
+            rr = o.get("range_ratio", 1.0)
+            if rr <= 0:
+                # DOWN→RANGE：暴跌后的筑底期零期望，按规则不留底仓。
+                # 这与「日线翻 DOWN」是两回事：状态没变差，只是来路决定这一段不值得押。
+                act = "清底仓"
+                note = (f"日线 {rs} 起为 RANGE（来路 {o.get('range_src')}），"
+                        f"按规则底仓归零，撤掉现货 {amt} U")
+            else:
+                act = "建底仓"
+                gtail = ("" if bg >= 1.0
+                         else f"（价格已在 MA{BG.GATE_MA} 下方，只建 {round(bg * 100)}%）")
+                rtail = ("" if rr >= 1.0
+                         else f"（来路 {o.get('range_src')}，只建 {round(rr * 100)}%）")
+                note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
+                        f"{gtail}{rtail}（4H 突破后再加到峰值）")
         else:
             continue                      # 已触发 = action 已是「开仓」，不重复
         key = act + ":" + rs

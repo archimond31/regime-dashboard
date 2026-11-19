@@ -147,6 +147,18 @@ for o in COINS:
     _lock = o.get("blood_locked")
     st_tail = ('<div style="font-size:10px;color:#d32f2f;margin-top:2px;line-height:1.2">'
                '⚠ 初始化<br>不可纠错</div>' if _lock else "")
+    # RANGE 段的「来路」：2026-11-19 起底仓按来路打折（portfolio_config.RANGE_RATIO_BY_SRC）
+    #   UP→RANGE   保持 100%（实测段内平均 +8.78%，砍掉等于砍尾部收益）
+    #   DOWN→RANGE 归零（实测 +0.50%，零期望的纯波动）
+    _rr = o.get("range_ratio", 1.0)
+    _src = o.get("range_src")
+    if st == "RANGE" and _src:
+        if _rr <= 0:
+            st_tail += ('<div style="font-size:10px;color:#c62828;margin-top:2px;'
+                        'line-height:1.2">来路 %s<br>底仓归零</div>' % _src)
+        else:
+            st_tail += ('<div style="font-size:10px;color:#757575;margin-top:2px;'
+                        'line-height:1.2">来路 %s</div>' % _src)
     # 底仓闸门：1.00 = 全额，0.25 = 价格已跌破 MA50 只留 25%。
     # 只影响底仓，加仓层由 4H 突破决定，与它无关。关闭时整列不渲染。
     _bg = o.get("base_gate", 1.0)
@@ -278,6 +290,8 @@ border-radius:8px;padding:12px 14px">
 日线 RANGE 不做空，只等向上突破。<b>波动分位 &gt; 85% 时一律不开新仓。</b><br>
 <b>平仓</b>：① 日线状态翻转　② 价格触及 1.5×ATR(14) 止损　③ 持有满 120 根 4H 强制平仓。<br>
 <b>仓位</b>：底仓 1.0 走现货，突破加仓 +0.5 走永续，总名义 1.5×。本页只给方向，不含下单。<br>
+<b>RANGE 来路</b>：RANGE 段的底仓按「进入前那段是什么」打折 —— 上行转来保持 100%（段内平均 +8.78%），
+下行转来归零（段内平均 +0.50%，零期望的纯波动）。状态格会标「来路 UP/DOWN」。<br>
 <b>HYPE 特别说明</b>：2024-12 才上线、只有约两年数据且全在牛市里，日线状态机没经过熊市检验，
 信号可以看，权重别按老币给。
 </div>

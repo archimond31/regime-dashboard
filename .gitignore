@@ -232,3 +232,17 @@ _base_gate.json
 
 # 底仓的功能分解（用户质疑：现货只是开多的通道，凭什么 1.0×）
 !_diag_base_role.py
+# 加仓层解剖（为什么只留加仓层只剩 42 万：在场时间 / 摩擦 / 押注量三层拆解）
+!_diag_add_sleeve.py
+# 多空对称性诊断（底仓 vs 加仓层 6 处硬差异、多空 818/850 笔对照、假 DOWN 伤害）
+!_diag_symmetry.py
+# 空头能否提到 1×（八臂：只放大突破 / 加空头底仓 / 带守卫 / 对称峰值）—— 全部否决
+!_exp_short1x.py
+# RANGE 段独立风险通道（4H 跌破前 N 根区间下沿）—— 全线否决，触发仅 5.1%
+!_exp_range_ch.py
+# RANGE 段恒定折扣菜单（Calmar 0.74→0.81 单调上升，但累计收益同向下降）
+!_exp_range_cut.py
+# RANGE 段按「来路」打折（UP→RANGE 1.0 / DOWN→RANGE 打折）—— 本案依据
+!_exp_range_src.py
+!_exp_range_src2.py
+!_verify_range_src.py

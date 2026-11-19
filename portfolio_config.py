@@ -86,6 +86,34 @@ SINGLE_CAP = 0.25         # 单币权重上限：防止容量填充把仓位全�
 BASE_RATIO = 1.0          # 底仓：UP/RANGE 时持有
 ADD_RATIO = 0.5           # 加仓层：突破后追加（多头叠加 / 空头唯一来源）
 
+# ---------- RANGE 段的「来路折扣」（2026-11-19 起）----------
+# RANGE 段底仓不再一律 1.0，而是按**进入 RANGE 之前那段是什么状态**区分。
+# 这是唯一被实测通过的风险调整：不改方向、不预测，只用一个历史事实做区分。
+#
+# 依据（_exp_range_src.py / _exp_range_src2.py，12 币、2020-09~2026-11）：
+#   UP→RANGE   203 段，段内平均 +8.78%，下跌占比 35%
+#     拆开看：96 段后续翻 UP（平均 +25.6%）、107 段翻 DOWN（平均 −6.3%）
+#     → 赢面只有 47%，但赢的时候赢 4 倍，是「小胜率大赔率」的凸性资产
+#     → 砍它等于砍掉尾部收益，所以保持 1.0
+#   DOWN→RANGE 200 段，段内平均 +0.50%，下跌占比 46%
+#     → 暴跌后的筑底期既没力气跌也没力气涨，零期望
+#     → 纯波动，打 0
+#
+# 效果（口径 A，本金恒 50 万）：
+#   Calmar 0.74 → 0.89（+20%），回撤 −61.2% → −48.2%（+13pp）
+#   累计 317 万 → 261 万（−17.7%）；2022 年 −52%→−37%，2025 年 −9%→+4%
+#
+# **这是风险偏好选择，不是免费午餐**：滚动 250 日窗口只有 37/97（38%）胜旧版，
+# 62% 的窗口里绝对收益更低。想吃满收益就把 DOWN 改回 1.0。
+#
+# 之前失败的同类尝试（不要重试）：
+#   · base_gate MA50+滞回 —— 修正一格前视后 275 万 < 302 万，负贡献
+#   · P0-3 ATR 吊灯 / 90 天强制复核 —— 全部否决
+#   · RANGE 内「跌破前 20 根低点」减仓 —— 触发仅 5.1%，且打不过无脑降仓
+#   三者都是在**预测 RANGE 会往哪边破**；本条不是预测，是按来路分类。
+RANGE_RATIO_BY_SRC = {"UP": 1.0, "DOWN": 0.0}
+RANGE_RATIO_DEFAULT = 1.0   # 来路不明（数据起点/预热期）时保守不打折
+
 # ---------- 容量红线 ----------
 # 口径（2026-11-18 统一定义，可复现）：
 #   **近 3 个完整自然月**的 4H 现货成交额（按 UTC 4H 桶汇总 quote volume）
@@ -168,7 +196,7 @@ WEIGHTS = weights_for(CAPITAL)      # 当前本金的生效权重
 
 
 def target(capital, coin, state, adding=False, closing=False, scale=1.0,
-           base_gate=1.0):
+           base_gate=1.0, range_src=None):
     """该币当前应持有的**名义金额**（USDT，负数=空头），以及一句人话说明。
 
     state:     "UP" / "RANGE" / "DOWN"（日线 G 状态机）
@@ -179,6 +207,9 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0,
     base_gate: 底仓闸门（base_gate.py 给出）。只作用于**底仓**，不影响加仓层。
                1.0 = 全额；0.25 = 价格已跌破 MA50，底仓只留 25%。
                加仓层不动，是因为它由 4H 突破触发，与日线趋势过滤无关。
+    range_src: 当前 RANGE 段的**来路**（"UP" / "DOWN" / None）。
+               只有 RANGE 状态才用。DOWN→RANGE 的 RANGE_RATIO_BY_SRC = 0，
+               即「暴跌后的筑底期不留底仓」。None（数据起点）取 DEFAULT=1.0。
     """
     w = weights_for(capital).get(coin)
     if w is None:
@@ -195,9 +226,17 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0,
                                ("未突破 → 底仓做多" if base_gate >= 1.0
                                 else "未突破 → 底仓打折 %d%%" % round(base_gate * 100))))
     if state == "RANGE":
-        # 回测里 RANGE 不进新仓（signals 只处理 UP/DOWN），底仓照持
-        return (base, "日线 RANGE｜" + ("底仓持有，不开新仓" if base_gate >= 1.0
-                                       else "底仓打折 %d%%，不开新仓" % round(base_gate * 100)))
+        # 回测里 RANGE 不进新仓（signals 只处理 UP/DOWN），底仓按来路打折后持有
+        rr = (RANGE_RATIO_BY_SRC.get(range_src, RANGE_RATIO_DEFAULT)
+              if range_src else RANGE_RATIO_DEFAULT)
+        src_txt = range_src if range_src else "未知"
+        if rr <= 0:
+            return (0.0, f"日线 RANGE（来路 {src_txt}）｜按规则底仓归零，不开新仓")
+        return (base * rr,
+                f"日线 RANGE（来路 {src_txt}）｜底仓持有 {round(rr * 100)}%"
+                + ("" if base_gate >= 1.0
+                   else "，且闸门再打 %d%%" % round(base_gate * 100))
+                + "，不开新仓")
     # DOWN
     if not ALLOW_SHORT:
         return 0.0, "日线 DOWN → 清仓（现货模式不做空）"
