@@ -279,3 +279,10 @@ holding_*.png
 
 # RANGE 一律 1.0 的三臂对照（2026-11-20）
 !_exp_range_all.py
+
+# 口径 B 重算（2026-11-20）：旧脚本未保留，这是新的唯一口径 B 出处
+!_exp_cum_b.py
+
+# STRATEGY.html 的生成器：HTML 纳入版本管理，生成器也必须纳入，
+# 否则没人能复现那份 HTML（且 md → html 的样式改动会无法追溯）
+!_md2html.py

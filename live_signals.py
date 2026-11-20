@@ -152,9 +152,8 @@ def analyze(c, now, prev_gate=None):
     o["regime_start"] = b4[min(k_seg, len(b4) - 1)]["date"]
 
     # RANGE 段的「来路」：进入 RANGE 之前那段是什么。
-    # 2026-11-20 起 RANGE_RATIO_BY_SRC 的 UP 与 DOWN 都是 1.0（震荡一律允许持有底仓），
-    # 所以 range_ratio 恒为 1.0；字段保留是为了「改回 0 时无需改代码」，
-    # 以及面板/台账里能看出这段震荡是从上涨还是下跌转过来的。
+    # 2026-11-20 盘后起 UP→1.0 / DOWN→0.5，所以 range_ratio 可能不是 1.0，
+    # 面板与台账都要显示实际比例（否则会和策略自相矛盾）。
     # 与回测 bt_skeleton.range_ratio_series() 完全同源（都取 rg4[k_seg-1]），
     # 且只依赖历史 bar，无前视。
     prev_st = rg4[k_seg - 1] if k_seg > 0 else None

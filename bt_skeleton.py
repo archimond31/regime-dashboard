@@ -98,22 +98,26 @@ _BLOOD_CACHE = {}
 def range_ratio_series(rg4):
     """逐 bar 的「RANGE 底仓系数」。**与闸门正交**，两者相乘。
 
-    【当前配置（2026-11-20 起）】UP 与 DOWN 都是 1.0 → 这个函数现在恒返回全 1.0，
-    等价于「震荡期一律持有满底仓」。保留这个函数是为了把「来路」这个信息留在
-    同一条管线上：改配置就能切换行为，不需要动 base_series / build / live_signals。
+    【当前配置（2026-11-20 盘后起）】UP→RANGE 取 1.0，DOWN→RANGE 取 0.5。
+    这个函数本身不写死任何数字，全部查 portfolio_config.RANGE_RATIO_BY_SRC，
+    所以改配置就能切换行为，不需要动 base_series / build / live_signals。
 
-    【历史】2026-11-19 曾设 DOWN→RANGE 打 0，依据是 12 币 403 段的统计
-    （UP→RANGE 平均 +8.78%，DOWN→RANGE 仅 +0.49% 且下跌占比 46%）。
-    2026-11-20 用户要求「震荡一律允许开底仓」，改回 1.0，
-    代价见 portfolio_config 注释里的三臂表（Calmar 0.90 → 0.75，回撤 −48.2% → −61.2%）。
+    【一天内改过三次，别只记住其中一版】
+      2026-11-19  UP=1.0 / DOWN=0.0   口径A 261 万，回撤 −48.2%，Calmar(C) 1.40
+      2026-11-20  UP=1.0 / DOWN=1.0   口径A 318 万，回撤 −61.2%，Calmar(C) 1.18
+      2026-11-20  UP=1.0 / DOWN=0.5   口径A 291 万，回撤 −54.9%，Calmar(C) 1.29  ← 当前
+    每 0.5 档 ≈ +28 万 / −6.8pp，严格线性 —— 这是**加 beta 不是加 alpha**。
+    最干净的证据：RANGE 段自身贡献 0→0.5→1.0 对应 −11.0% / −19.7% / −30.3%，
+    与系数严格成比例，而同期 UP 段恒 −30.9%。三臂全表见 _exp_range_all.py。
 
     **无前视**：来路取 rg4[k-1]，是 bar k 开始前就已知的历史事实，
     所以 out[k] 直接作用于 bar k 的收益是对的，不需要左移一格。
-    （_exp_range_all.py 实测：A2 臂原样 vs 左移一格差 0 万。）
+    （_verify_range_src.py【5】把 rg4 整体右移一格，290 万 → 283 万，差 8 万，噪声级。）
 
     注意 RANGE 段内部必须**沿用进入时的来路**，不能每根重新看前一根 ——
-    否则第二根起前一根是 RANGE，来路就丢了。当前配置下结果恒 1.0 看不出差别，
-    但一旦把 DOWN 调回 0.0，这个延续性就是正确性的关键。
+    否则第二根起前一根已是 RANGE，来路就丢了，整段会退回 DEFAULT=1.0。
+    _verify_range_src.py 为此专门有一项「临时配置 UP=1.0 / DOWN=0.25 重跑」的
+    加固测试：配置两边相等时原有检查会退化成恒真，测不出这个 bug。
     """
     import portfolio_config as PC
     out = [1.0] * len(rg4)
@@ -135,8 +139,7 @@ def base_series(b4, d1, rg4):
 
     · 状态基础值：UP/RANGE = 1.0，DOWN = 0.0（BASE 表）
     · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，默认已关闭）
-    · RANGE 系数：当前配置恒 1.0（2026-11-20 起震荡一律给满底仓），
-                  字段保留以便改回「按来路打折」而无需动管线
+    · RANGE 系数：按来路查 RANGE_RATIO_BY_SRC（当前 UP→1.0 / DOWN→0.5）
 
     下标语义：返回值 k 是「在 bar k 期间生效」的系数，即乘在 r[k]=close[k]/close[k-1] 上。
     闸门内部已经左移一格（gate 是拿 close[k] 算的，只能作用于 bar k+1），
@@ -331,7 +334,7 @@ def build(coin):
     sig, trades = signals(b4, rg4, atr, vol_q=VOL_Q, coin=coin)
 
     n = len(b4)
-    # 底仓 = 状态基础值 × RANGE 系数（当前恒 1.0，见 range_ratio_series）。
+    # 底仓 = 状态基础值 × RANGE 系数（按来路查配置，见 range_ratio_series）。
     # 闸门已关闭，这里不叠加；若将来开启闸门，必须改用 base_series(b4, d1, rg4)
     # 以免两处口径分叉（2026-11-19 踩过这个坑）。
     rr = range_ratio_series(rg4)

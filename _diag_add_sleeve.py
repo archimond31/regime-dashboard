@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""_diag_add_sleeve.py —— 只留加仓层为什么只剩 42 万
+"""_diag_add_sleeve.py —— 只留加仓层为什么只剩 43 万
+
+注（2026-11-20）：底仓系数已改成按 RANGE 来路查配置（UP→1.0 / DOWN→0.5），
+本脚本同步接了 BT.range_ratio_series，否则会算在「RANGE 一律 1.0」的旧基线上。
+当前结果：C1 完整 286 万 / C2 只加仓 43 万 / C4 只底仓 216 万 / 协同 27 万。
 
 先拆掉一个伪问题：加仓层不是因为「笨」才赚得少。它的平均敞口只有 0.76×，
 而完整策略是 3.46×。敞口差 4.5 倍，收益差 7.4 倍 —— 超出线性的那部分才是真问题。
@@ -122,7 +126,8 @@ def run(sig_of, base_mult=0.0, add_mult=0.5):
     for c in ALL12:
         b4, rg4 = DATA[c]["b4"], DATA[c]["rg4"]
         sig = sig_of(DATA[c], c)
-        base = [BT.BASE.get(rg4[k], 0.0) * base_mult for k in range(len(b4))]
+        rr = BT.range_ratio_series(rg4)
+        base = [BT.BASE.get(rg4[k], 0.0) * rr[k] * base_mult for k in range(len(b4))]
         pv = [(base[k] + add_mult * sig[k]) * COEF[c][k] * VT.KAPPA
               for k in range(len(b4))]
         qv = PC.CAP_4H_WORST.get(c) or 1e12
@@ -295,7 +300,7 @@ print(f"    → 风险调整后两者相当（Calmar {c5['calmar']:.2f} vs {c7['
       f"加仓层略胜 —— 突破择时买到的是「更浅的回撤」，不是「更多的收益」。")
 
 print("\n" + "=" * 104)
-print("【5】「损失」到底由什么构成：C1 310 万 = C2 42 万 + C4 234 万 + 协同 34 万")
+print("【5】「损失」到底由什么构成（C1 完整 = C2 只加仓 + C4 只底仓 + 协同）")
 print("=" * 104)
 c1, c4 = R["C1 完整策略 1.0+0.5"], R["C4 只底仓 1.0+0"]
 gap = c1["cum"] - c2["cum"]
