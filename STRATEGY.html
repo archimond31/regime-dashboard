@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>加密趋势策略说明书</title>
+<style>
+:root{
+  --ink:#1a1d21; --ink2:#3f4650; --ink3:#6b7481;
+  --line:#e3e6ea; --line2:#eef1f4;
+  --bg:#ffffff; --bg2:#f7f8fa; --bg3:#f2f4f7;
+  --accent:#1f4e79; --accent2:#2d6ca3;
+  --warn:#a8321f; --warnbg:#fdf3f1;
+  --ok:#1e6b45; --okbg:#f2f8f4;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; padding:0; background:var(--bg2);
+  font-family:"Georgia","Songti SC","Source Han Serif SC","Noto Serif CJK SC",serif;
+  color:var(--ink); line-height:1.78; font-size:15.5px;
+}
+.wrap{max-width:900px; margin:0 auto; background:var(--bg);
+  padding:56px 64px 80px; box-shadow:0 1px 24px rgba(20,30,45,.07);}
+h1,h2,h3,h4{
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); line-height:1.35; font-weight:600;
+}
+h1{font-size:29px; margin:8px 0 6px; letter-spacing:-.3px;}
+h1+h2{margin-top:14px}
+h2{font-size:20.5px; margin:44px 0 14px; padding-bottom:9px;
+   border-bottom:2px solid var(--line); letter-spacing:-.2px;}
+h2::before{content:""; display:inline-block; width:4px; height:17px;
+  background:var(--accent); margin-right:11px; vertical-align:-2px; border-radius:1px;}
+h3{font-size:16.5px; margin:30px 0 10px; color:var(--accent);}
+h4{font-size:15px; margin:22px 0 8px; color:var(--ink2);}
+p{margin:11px 0;}
+a{color:var(--accent2);}
+strong{color:var(--ink); font-weight:600;}
+em{color:var(--ink2);}
+hr{border:0; border-top:1px solid var(--line); margin:34px 0;}
+blockquote{
+  margin:18px 0; padding:13px 20px; background:var(--bg3);
+  border-left:3px solid var(--accent2); color:var(--ink2); font-size:14.5px;
+}
+blockquote p{margin:5px 0;}
+blockquote h2,blockquote h3{border:0; margin:6px 0;}
+table{
+  border-collapse:collapse; width:100%; margin:16px 0 20px;
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:13.6px; line-height:1.55;
+}
+thead th{
+  background:var(--bg3); color:var(--ink); font-weight:600;
+  text-align:left; padding:9px 11px; border-bottom:2px solid #cfd6de;
+  white-space:nowrap;
+}
+tbody td{padding:8px 11px; border-bottom:1px solid var(--line2); vertical-align:top;}
+tbody tr:nth-child(even){background:#fbfcfd;}
+tbody tr:hover{background:#f5f8fb;}
+table code{font-size:12.5px;}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  background:var(--bg3); padding:1.5px 5px; border-radius:3px;
+  font-size:13px; color:#8a3b2c;
+}
+pre{
+  background:#1e2430; color:#e6e9ef; padding:15px 18px; border-radius:5px;
+  overflow-x:auto; font-size:13px; line-height:1.65; margin:16px 0;
+}
+pre code{background:none; color:inherit; padding:0; font-size:13px;}
+ul,ol{margin:11px 0; padding-left:26px;}
+li{margin:5px 0;}
+li>ul,li>ol{margin:4px 0;}
+.header-meta{
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:13px; color:var(--ink3); margin:0 0 26px;
+  padding-bottom:16px; border-bottom:1px solid var(--line);
+}
+.warn{
+  background:var(--warnbg); border-left:3px solid var(--warn);
+  padding:12px 18px; margin:16px 0; font-size:14.2px; color:#5a2620;
+}
+@media print{
+  body{background:#fff; font-size:10.5pt;}
+  .wrap{box-shadow:none; padding:0; max-width:none;}
+  h2{page-break-after:avoid;}
+  table,pre,blockquote{page-break-inside:avoid;}
+}
+@media (max-width:720px){
+  .wrap{padding:28px 20px 50px;}
+  h1{font-size:23px;} h2{font-size:18px;}
+  table{font-size:12.2px;}
+  thead th,tbody td{padding:6px 7px;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="_1">加密趋势策略说明书</h1>
+<blockquote>
+<p>版本：2026-11-19（提交 <code>e24a966</code> 之后）
+适用：本金 5 万 ~ 100 万 USDT，12 币组合，4H 级别信号 + 人工执行
+本文档描述的是<strong>交易策略</strong>。市场状态面板（22 品种趋势监控）见 <code>README.md</code>。</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 一页速览</h2>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一句话</td>
+<td>用日线趋势状态机定方向、4H 突破择时、状态翻转即离场的<strong>低频趋势跟随</strong>策略</td>
+</tr>
+<tr>
+<td>方向来源</td>
+<td>日线 G 状态机（MA120 定初始 + RSI 70/30 两日确认 + 背离 + 背离失败纠错）</td>
+</tr>
+<tr>
+<td>入场触发</td>
+<td>4H 收盘突破前 20 根极值（20 根 = 80 小时 ≈ 3.3 天）</td>
+</tr>
+<tr>
+<td>持仓结构</td>
+<td>底仓 1.0×（现货）+ 加仓层 0.5×（永续），最大峰值 1.5×</td>
+</tr>
+<tr>
+<td>出场</td>
+<td>状态翻转 / 1.5×ATR(14) 硬止损 / 满 120 根 4H（20 天）兜底</td>
+</tr>
+<tr>
+<td>信号频率</td>
+<td>每 4 小时一次（每天 6 班）。12 币组合 6.21 年累计 1668 笔加仓层交易 ≈ <strong>每年 270 笔</strong>，另有底仓随日线状态变化</td>
+</tr>
+<tr>
+<td>实测（50 万本金，2020-09 ~ 2026-11，6.22 年）</td>
+<td>累计 <strong>+291 万</strong>；最大回撤 <strong>−54.9%</strong>；年胜率 <strong>5/7</strong></td>
+</tr>
+<tr>
+<td>诚实口径（全复利 + 容量自适应）</td>
+<td><strong>5.82×</strong>，年化 <strong>+32.8%</strong>，回撤 −41.6%，Calmar 0.79</td>
+</tr>
+<tr>
+<td>最难受的时候</td>
+<td>2022 年：跌 406 天到 −54.9%，再花 308 天回本（同期 BTC −75.7%，两年后仍未回本）</td>
+</tr>
+<tr>
+<td>适合谁</td>
+<td>能接受"一年不赚钱"、不需要现金流、愿意每天花 5 分钟核对工单的人</td>
+</tr>
+<tr>
+<td>不适合谁</td>
+<td>需要月度正收益、无法承受 −50% 回撤、想靠它替代工资的人</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1">1. 设计哲学</h2>
+<p>这套策略不是为了"预测涨跌"，它只在做三件事：</p>
+<ol>
+<li><strong>用一个慢变量定方向</strong>，慢到不会因为一根大阳线就翻多、也不会因为一次插针就翻空。</li>
+<li><strong>用一个快变量择时</strong>，等到价格真的突破了才动手，而不是在区间里猜底猜顶。</li>
+<li><strong>用状态翻转当离场</strong>，而不是设一个止盈价——趋势策略的钱来自"让利润跑"，止盈会切掉尾部。</li>
+</ol>
+<p>三条规则的共同点是：<strong>都不预测，只确认</strong>。代价是永远慢半拍（买不到最低点、卖不到最高点），收益是极少被判错方向反复打脸。</p>
+<p>配套的一条硬纪律：<strong>任何"用今天收盘价算出来的仓位"，都必须作用于明天的收益</strong>。这条纪律曾被违反一次，导致整个"底仓退出"研究线的结论虚高 101 万（详见 §8.4）。</p>
+<hr />
+<h2 id="2">2. 三层骨架</h2>
+<h3 id="l1">L1 日线状态机 —— 定方向与底仓</h3>
+<p>状态只有三个：<code>UP</code>（上升）/ <code>RANGE</code>（震荡）/ <code>DOWN</code>（下降）。</p>
+<p><strong>参数</strong>（<code>visualize_btc_regime.daily_states</code>，调用点 <code>strategy_1h_rsi._states</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start_idx</code></td>
+<td>120</td>
+<td>判定起点。必须凑满 120 根日线才有 MA120</td>
+</tr>
+<tr>
+<td><code>ma_slow</code></td>
+<td>120</td>
+<td>慢线：定初始方向 + 背离态参照</td>
+</tr>
+<tr>
+<td><code>ma_fast</code></td>
+<td>60</td>
+<td>快线：震荡中穿越触发 + 趋势态纠错</td>
+</tr>
+<tr>
+<td><code>ob</code> / <code>os</code></td>
+<td>70 / 30</td>
+<td>RSI(14, Wilder) 超买 / 超卖阈值</td>
+</tr>
+<tr>
+<td><code>confirm</code></td>
+<td>2</td>
+<td>连续 2 日站稳才算数（防止单日假突破）</td>
+</tr>
+<tr>
+<td><code>use_div</code></td>
+<td>True</td>
+<td>启用 RSI 背离信号</td>
+</tr>
+<tr>
+<td><code>cross_fix</code></td>
+<td>True</td>
+<td>趋势态可被 MA60 反向穿越纠错</td>
+</tr>
+<tr>
+<td><code>range_retrigger</code></td>
+<td>True</td>
+<td>RANGE 态可被 RSI 再触发解除</td>
+</tr>
+<tr>
+<td><code>div_fail</code></td>
+<td>True</td>
+<td>背离失败自动回 RANGE</td>
+</tr>
+</tbody>
+</table>
+<p><strong>状态切换规则</strong>（优先级从上到下）：</p>
+<table>
+<thead>
+<tr>
+<th>从</th>
+<th>到</th>
+<th>触发条件</th>
+<th>血统标记</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>任意</td>
+<td>DOWN</td>
+<td>顶背离（价格新高、RSI 未新高）</td>
+<td><code>divergence_top</code></td>
+</tr>
+<tr>
+<td>任意</td>
+<td>UP</td>
+<td>底背离（价格新低、RSI 未新低）</td>
+<td><code>divergence_bottom</code></td>
+</tr>
+<tr>
+<td>UP</td>
+<td>RANGE</td>
+<td>RSI 连续 2 日 ≥70（确认超买）<strong>之后</strong>又跌破 70</td>
+<td><code>rsi_overbought_exit</code></td>
+</tr>
+<tr>
+<td>UP</td>
+<td>DOWN</td>
+<td>收盘连续 2 日跌破 MA60（仅 <code>range_cross</code> 血统可触发）</td>
+<td><code>cross_fix_down</code></td>
+</tr>
+<tr>
+<td>DOWN</td>
+<td>RANGE</td>
+<td>RSI 连续 2 日 ≤30（确认超卖）<strong>之后</strong>又升破 30</td>
+<td><code>rsi_oversold_exit</code></td>
+</tr>
+<tr>
+<td>DOWN</td>
+<td>UP</td>
+<td>收盘连续 2 日站上 MA60（仅 <code>range_cross</code> 血统可触发）</td>
+<td><code>cross_fix_up</code></td>
+</tr>
+<tr>
+<td>RANGE</td>
+<td>UP</td>
+<td>收盘上穿 MA60（前一根在下方）</td>
+<td><code>ma60_cross_up</code></td>
+</tr>
+<tr>
+<td>RANGE</td>
+<td>DOWN</td>
+<td>收盘下穿 MA60（前一根在上方）</td>
+<td><code>ma60_cross_down</code></td>
+</tr>
+<tr>
+<td>RANGE</td>
+<td>UP/DOWN</td>
+<td>RSI 连续 2 日 ≥70 / ≤30（价格单侧暴涨暴跌、永不穿 MA60 时的出口）</td>
+<td><code>rsi_retrigger_*</code></td>
+</tr>
+<tr>
+<td>背离态</td>
+<td>RANGE</td>
+<td>价格连续 2 日突破背离摆动极值（背离失败）</td>
+<td><code>div_fail_top/bottom</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键设计：状态的"血统"决定它能不能被纠错。</strong></p>
+<p>每段状态都记着它是怎么来的（<code>entry_reason</code>），血统决定退出通道：</p>
+<table>
+<thead>
+<tr>
+<th>血统</th>
+<th>能否被 MA60 反向穿越纠错</th>
+<th>能否被背离失败纠错</th>
+<th>实际出口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>range_cross</code>（由 RANGE 穿 MA60 进入）</td>
+<td>✅</td>
+<td>—</td>
+<td>MA60 反穿 / RSI 阈值退出</td>
+</tr>
+<tr>
+<td><code>divergence</code>（背离触发）</td>
+<td>❌（逆势信号，怕砍太早）</td>
+<td>✅</td>
+<td>背离失败 / RSI 阈值退出</td>
+</tr>
+<tr>
+<td><code>init_ma120</code>（初始化猜的）</td>
+<td>❌</td>
+<td>❌</td>
+<td><strong>只剩 RSI 阈值退出 → 上涨行情中永不触发 → 死锁</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>init_ma120</code> 是已知的设计缺陷。实例：HYPE 2024-12 上线，2025-04-04 凑满 120 根时 MA120 仍在消化上线后 $34→$7 的崩盘，收盘在均线下方四成 → 必然判 DOWN，锁死 48 天，期间价格 <strong>+181.5%</strong>，策略反向做空 4 次全止损（−4R）。</p>
+<p><strong>当前对策不是修改状态机，而是禁止在这个血统下开新仓</strong>（<code>bt_skeleton.BLOCK_INIT = True</code>）。底仓仍按状态执行，只是不吃 4H 突破单。样本外检验：10 币"上线初期 200 天" <strong>6 改善 / 1 变差</strong>。</p>
+<hr />
+<h3 id="l2-4h">L2 4H 突破 —— 择时与加仓</h3>
+<p><strong>只在 UP 或 DOWN 状态下运行，RANGE 不产生加仓信号。</strong></p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>规则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>触发</td>
+<td>UP：4H 收盘 &gt; 前 20 根 4H 的最高价<br>DOWN：4H 收盘 &lt; 前 20 根 4H 的最低价</td>
+</tr>
+<tr>
+<td>幅度</td>
+<td><code>ADD = 0.5×</code>（相对单币权重）</td>
+</tr>
+<tr>
+<td>波动过滤</td>
+<td>该币 ATR/收盘价 的 500 根滚动分位 &gt; <strong>85%</strong> → 不开仓</td>
+</tr>
+<tr>
+<td>血统过滤</td>
+<td><code>init_ma120</code> 血统 → 不开仓</td>
+</tr>
+<tr>
+<td>同时持仓</td>
+<td>每币同时只持一单，平掉后才能开下一单</td>
+</tr>
+</tbody>
+</table>
+<p><strong>为什么是 20 根？</strong> 20 根 4H = 80 小时 ≈ 3.3 天。短于这个数会被日内噪声反复扫；长于这个数会错过趋势前段。这是回测出来的平台区，不是唯一最优解——30 根、40 根的表现差异在噪声范围内。</p>
+<p><strong>为什么要 ATR 分位过滤？</strong> 剔除"波动已经过热"的入场。实测剔除最高 10~25% 的入场，组合 Calmar 从 1.24 升到 1.35，且 8/10 品种改善，75~90% 是连续平台（<code>VOL_Q = 0.85</code> 取中点）。</p>
+<blockquote>
+<p>⚠️ 已知反例：该过滤对<strong>空头方向是反向的</strong>。实验 S6（带 ATR 过滤的空头加码臂）反而比 S3 差 66 万。目前代码对多空一视同仁，这是一个未修复的已知偏差，见 §9。</p>
+</blockquote>
+<hr />
+<h3 id="l3">L3 出场 —— 三条通道</h3>
+<table>
+<thead>
+<tr>
+<th>通道</th>
+<th>规则</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>状态翻转</td>
+<td>4H 收盘时 <code>rg4[j] != rg</code>（入场时的状态）→ 按收盘价平</td>
+<td>主出场通道，占了大部分正收益</td>
+</tr>
+<tr>
+<td>硬止损</td>
+<td><code>entry ∓ 1.5 × ATR(14)</code>，盘中触及即平</td>
+<td>固定不动，<strong>不追踪</strong></td>
+</tr>
+<tr>
+<td>时间兜底</td>
+<td>满 <code>MAX_BARS = 120</code> 根 4H（20 天）→ 按收盘价平</td>
+<td>防止"僵尸仓"长期占额度</td>
+</tr>
+</tbody>
+</table>
+<p><strong>出场原因的真实分布</strong>（1668 笔加仓层交易）：</p>
+<table>
+<thead>
+<tr>
+<th>原因</th>
+<th>笔数</th>
+<th>占比</th>
+<th>累计 R</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stop</code> 止损</td>
+<td>1255</td>
+<td>75%</td>
+<td>−1255R</td>
+</tr>
+<tr>
+<td><code>flip</code> 状态翻转</td>
+<td>247</td>
+<td>15%</td>
+<td><strong>+1547R</strong></td>
+</tr>
+<tr>
+<td><code>timeout</code> 兜底</td>
+<td>166</td>
+<td>10%</td>
+<td>+869R</td>
+</tr>
+</tbody>
+</table>
+<p>这张表说明策略的全部利润来自 15% 的翻转单。<strong>去止损不会更好</strong>——实验显示去掉止损后加仓层只剩 35 万（vs 42 万），因为 75% 的止损单本该被砍，放任它们会占用仓位额度，让翻转单排不进来。</p>
+<p><strong>已关闭的两个开关</strong>（代码保留，默认 0）：</p>
+<ul>
+<li><code>TRAIL_K = 0</code>（追踪止损）：实测开启后并不改善，且容易在趋势前段被噪声扫掉</li>
+<li><code>EARLY_N = 0</code>（早期淘汰）：入场后 10 根内浮盈不足 0.4R 就平。逻辑上应该有效（681 笔在 10 根内被止损，合计 −676R），但实测综合效果不稳定</li>
+</ul>
+<hr />
+<h2 id="3">3. 仓位与敞口</h2>
+<h3 id="31">3.1 单币仓位公式</h3>
+<pre><code>名义金额 = 本金 × 权重 × 敞口倍数 × 波动系数 × κ × 底仓折扣
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>底仓倍数</th>
+<th>加仓层</th>
+<th>峰值敞口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UP（4H 未突破）</td>
+<td>1.0</td>
+<td>0</td>
+<td><strong>1.0×</strong></td>
+</tr>
+<tr>
+<td>UP（4H 已突破）</td>
+<td>1.0</td>
+<td>+0.5</td>
+<td><strong>1.5×</strong></td>
+</tr>
+<tr>
+<td>RANGE（来路 = UP）</td>
+<td>1.0</td>
+<td>0</td>
+<td><strong>1.0×</strong></td>
+</tr>
+<tr>
+<td>RANGE（来路 = DOWN）</td>
+<td><strong>0.5</strong></td>
+<td>0</td>
+<td><strong>0.5×</strong></td>
+</tr>
+<tr>
+<td>DOWN（4H 未跌破）</td>
+<td>0</td>
+<td>0</td>
+<td><strong>0×</strong></td>
+</tr>
+<tr>
+<td>DOWN（4H 已跌破）</td>
+<td>0</td>
+<td>−0.5</td>
+<td><strong>−0.5×</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>为什么空头只有 0.5×？</strong> 因为空头没有底仓——现货底仓在 DOWN 状态是 0，空头唯一来源就是那 0.5× 加仓层。这不是歧视空头，是"底仓用现货不付资金费"这个结构的必然结果。</p>
+<p>实测：把空头提到 1× 会让八种变体<strong>全部变差</strong>，单位敞口效率从 91 万/倍单调跌到 45 万/倍。原因是假 DOWN：479 段 DOWN 里有 45 段（9.4%）随后涨超 20%，最狠的 HYPE 单段 +182.7%，一段就能亏掉 −294% 的总收益。</p>
+<p><strong>RANGE 段：允许持有底仓，来路 UP 给满仓、来路 DOWN 给半仓（2026-11-20 折中档）。</strong> 离开 RANGE 时的处理是状态机的自动结果，不需要额外规则：</p>
+<table>
+<thead>
+<tr>
+<th>转移</th>
+<th>底仓系数</th>
+<th>实际含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RANGE（UP 来的）→ UP</td>
+<td>1.0 → 1.0</td>
+<td>底仓<strong>留着</strong></td>
+</tr>
+<tr>
+<td>RANGE（DOWN 来的）→ UP</td>
+<td>0.5 → 1.0</td>
+<td>底仓<strong>加回满仓</strong></td>
+</tr>
+<tr>
+<td>RANGE（任一来路）→ DOWN</td>
+<td>→ 0.0</td>
+<td>底仓<strong>清掉</strong>（BASE 表 DOWN=0 决定）</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>这条规则被改过三次，别只记住其中一版。</strong>
+2026-11-19：按来路区分，UP→1.0 / DOWN→<strong>0.0</strong>（依据 403 段统计，DOWN→RANGE 均值仅 +0.49%）。
+2026-11-20 上午：用户要求「震荡一律允许开底仓」，改成<strong>一律 1.0</strong>。
+2026-11-20 盘后：折中到 DOWN→<strong>0.5</strong>（即当前值）。</p>
+</blockquote>
+<p>三档实测（<code>_exp_range_all.py</code>，12 币 404 段）：</p>
+<table>
+<thead>
+<tr>
+<th>臂</th>
+<th>累计</th>
+<th>回撤</th>
+<th>Calmar</th>
+<th>2022 年</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A0 UP1.0 / DN<strong>0.0</strong></td>
+<td>263 万</td>
+<td>−48.2%</td>
+<td><strong>0.90</strong></td>
+<td>−36.8%</td>
+</tr>
+<tr>
+<td>A1 UP1.0 / DN<strong>0.5</strong>（<strong>现用</strong>）</td>
+<td><strong>291 万</strong></td>
+<td><strong>−54.9%</strong></td>
+<td>0.82</td>
+<td>−44.9%</td>
+</tr>
+<tr>
+<td>A2 UP1.0 / DN<strong>1.0</strong></td>
+<td>319 万</td>
+<td>−61.2%</td>
+<td>0.75</td>
+<td>−52.4%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>收益与回撤同步线性放大</strong>（每 0.5 档约 +28 万 / −6.8pp），Calmar 单调下降。这是加 beta，不是加 alpha：DOWN→RANGE 的 201 段赢面 53%、赢时平均 +12.23%、输时平均 −12.88%，是几乎完美对称的随机游走，均值 +0.49% 小到无法覆盖波动。滚动 250 日 A1/A2 都是 60/97 胜 A0，但最差分别是 −10.9pp / −21.0pp。恶化全部来自 2022；<strong>2024-2026 段三档回撤都是 −37%</strong>。</p>
+<p><strong>这是风险偏好选择，不是改进了策略。</strong> 想换回低回撤版：<code>RANGE_RATIO_BY_SRC["DOWN"] = 0.0</code>；想满仓：<code>= 1.0</code>。</p>
+<h3 id="32-50">3.2 权重表（本金 50 万，容量约束模式）</h3>
+<table>
+<thead>
+<tr>
+<th>币</th>
+<th>权重</th>
+<th>币</th>
+<th>权重</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BTC</td>
+<td>25.0%</td>
+<td>ZEC</td>
+<td>2.4%</td>
+</tr>
+<tr>
+<td>HYPE</td>
+<td>25.0%</td>
+<td>DOGE</td>
+<td>1.2%</td>
+</tr>
+<tr>
+<td>ETH</td>
+<td>16.1%</td>
+<td>NEAR</td>
+<td>0.9%</td>
+</tr>
+<tr>
+<td>SOL</td>
+<td>6.6%</td>
+<td>LINK</td>
+<td>0.7%</td>
+</tr>
+<tr>
+<td>BNB</td>
+<td>3.5%</td>
+<td>UNI</td>
+<td>0.7%</td>
+</tr>
+<tr>
+<td>XRP</td>
+<td>3.1%</td>
+<td>AAVE</td>
+<td>0.4%</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td><strong>合计</strong></td>
+<td><strong>85.4%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>权重不是拍脑袋定的，是容量算出来的</strong>：<code>min(SINGLE_CAP, 单笔冲击红线 × 该币最差 4H 成交额 ÷ 本金)</code>。BTC/HYPE 流动性最好所以顶到 25% 上限，LINK/AAVE 流动性差所以只有 0.7%/0.4%。</p>
+<p>剩余 14.6% 是现金——<strong>不做归一化</strong>，因为归一化会把每个币重新顶回超标区，等于自欺欺人。</p>
+<blockquote>
+<p>小资金（约 5 万以下）走等权表：10 币各 9.2%，AAVE/LINK 各 4%。</p>
+</blockquote>
+<h3 id="33-vt60">3.3 波动目标化（VT60）</h3>
+<pre><code>波动系数 s = clip(0.60 / σ, 0.30, 2.00) × 1.22
+</code></pre>
+<p>σ 是该币日收盘收益的 60 天滚动年化波动，严格只用当日之前的数据。</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LB</code></td>
+<td>60 天</td>
+<td>波动回看窗口</td>
+</tr>
+<tr>
+<td><code>TARGET</code></td>
+<td>0.60</td>
+<td>目标年化波动 60%</td>
+</tr>
+<tr>
+<td><code>LO</code> / <code>HI</code></td>
+<td>0.30 / 2.00</td>
+<td>系数上下限</td>
+</tr>
+<tr>
+<td><code>KAPPA</code></td>
+<td>1.22</td>
+<td>把平均总敞口拉回等资金口径的归一化常数</td>
+</tr>
+<tr>
+<td><code>REBAL_DAYS</code></td>
+<td>7 天</td>
+<td>系数刷新周期（用日历桶，无状态可复现）</td>
+</tr>
+</tbody>
+</table>
+<p>它治的是"币间风险预算不均"（高波动币年化 90~160%，BTC 只有 40~60%，同样 9% 的钱风险差 2 倍）。
+它<strong>不治系统性风险</strong>——2022 年 12 币同跌，VT 和等资金都亏 50% 上下，只差 5pp。</p>
+<p>代价：2021 那种"暴涨伴随波动飙升"的行情里会砍掉赢家后半段（VT60 当年 +151%，等资金 +363%，少赚 212pp）。这是设计取舍。</p>
+<h3 id="34">3.4 再平衡</h3>
+<p><strong>季度</strong>（每年 1/4/7/10 月）按当时净值重算权重并调仓。换手成本按 7bp × 换手率计。</p>
+<p>不按月或按周，因为：权重来自容量约束，而容量（4H 成交额）的变化是季度级别的；调得太勤只会增加摩擦。</p>
+<hr />
+<h2 id="4">4. 执行细节</h2>
+<h3 id="41">4.1 时间表</h3>
+<p>信号在<strong>每根 4H 收盘后 5 分钟</strong>生成（北京时间为准）：</p>
+<table>
+<thead>
+<tr>
+<th>北京时间</th>
+<th>UTC</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>00:05</td>
+<td>16:00 前一日</td>
+<td>美股收盘时段，波动最大的一班</td>
+</tr>
+<tr>
+<td>04:05</td>
+<td>20:00</td>
+<td></td>
+</tr>
+<tr>
+<td>08:05</td>
+<td>00:00</td>
+<td><strong>日线收盘</strong>，状态机更新在这班</td>
+</tr>
+<tr>
+<td>12:05</td>
+<td>04:00</td>
+<td></td>
+</tr>
+<tr>
+<td>16:05</td>
+<td>08:00</td>
+<td></td>
+</tr>
+<tr>
+<td>20:05</td>
+<td>12:00</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>日线状态只在 08:05 那班会变</strong>，其余五班只会出现 4H 突破/止损信号。</p>
+<h3 id="42">4.2 一条命令跑完全链路</h3>
+<pre><code class="language-bash">python run_signal.py            # 出信号 → 渲染 HTML → 发邮件（有动作才发）
+python run_signal.py --always   # 不管有没有动作都发
+python run_signal.py --digest   # 每日日报（每天北京最多一封）
+python run_signal.py --dry      # 全链路跑但不发信
+python run_signal.py --force    # 忽略去重，强制重发同一根 4H
+</code></pre>
+<p>退出码：0 正常（含"无动作跳过"），1 有品种取数失败。<strong>单个币取数失败不致命</strong>——少一个币照发，表里标红。</p>
+<h3 id="43-vs">4.3 常驻 vs 计划任务（二选一，不能同开）</h3>
+<pre><code class="language-bash">python monitor.py               # 前台常驻，Ctrl+C 退出（推荐日常用）
+python monitor.py --once        # 只跑一次
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>方式</th>
+<th>优点</th>
+<th>缺点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>monitor.py</code> 常驻</td>
+<td>逻辑简单、日志连续</td>
+<td>关窗口/重启就停</td>
+</tr>
+<tr>
+<td>计划任务 <code>RegimeSignal4H</code></td>
+<td>不怕关窗口、不怕重启</td>
+<td>需手动安装，改路径要重装</td>
+</tr>
+</tbody>
+</table>
+<p>两者都会在 4H 收盘后 5 分钟跑，<strong>同开会让同一根 4H 发两封邮件</strong>（台账按 bar 去重，但同一秒双启动两边都还没写台账，挡不住）。</p>
+<p>切换方法：<code>deploy\task_ctl.cmd on</code> / <code>off</code>，切换前必须先停掉另一个。</p>
+<h3 id="44">4.4 工单制：解决"看到了、以为做了、其实没做"</h3>
+<p><code>live_signals.py</code> 每根 4H 说一次"该做什么"，说完就忘。手动执行最大的风险不是漏看，而是<strong>看到了、以为做了、其实没做</strong>，而系统每一轮都重启记忆，永远发现不了。</p>
+<p>所以所有动作沉淀成带状态的工单：</p>
+<pre><code class="language-bash">python ticket.py sync            # 按 _signal.json 同步（run_signal.py 自动调）
+python ticket.py list            # 看当前未结算工单
+python ticket.py done 3 80255.5  # 标记 3 号已执行，记下成交价
+python ticket.py drop 3          # 明确放弃 3 号
+python ticket.py stats           # 实测&quot;建单到结算&quot;的延迟分布 + 折算 R 损失
+</code></pre>
+<p>工单会<strong>自动作废</strong>（行情自己走掉了）、<strong>自动老化</strong>（每过一根 4H，<code>age_bars +1</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>动作类型</th>
+<th>TTL</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开仓</td>
+<td>6 根 4H（24h）</td>
+<td>实测每延迟 4h 总 R 掉 7.8%，24h 掉 33.8%</td>
+</tr>
+<tr>
+<td>清/建底仓</td>
+<td>24 根 4H</td>
+<td>日线级动作，"卖底仓后价格接近随机"，只作遗忘提醒</td>
+</tr>
+</tbody>
+</table>
+<h3 id="45">4.5 执行前的三个核对</h3>
+<ol>
+<li><strong>底仓用现货，加仓层用永续。</strong> 底仓走现货是因为不付资金费（BTC 永续牛市 funding 均值约 3bp/日 ≈ 11%/年，长期持有是纯损耗）。加仓层时间短、方向对冲，用永续更灵活。</li>
+<li><strong>单笔冲击 ≤ 3% 最差 4H 成交额。</strong> <code>portfolio_config.cap_check(amount, coin)</code> 会给出判定，超过 1% 就要拆单（<code>orders_needed()</code> 给份数）。</li>
+<li><strong><code>base_held</code> 是"按规则应持有"，不是"实际持有"。</strong> 如果该币在上一段 DOWN 里已经清过底仓，本轮提示的"建底仓 X U"可能只需要补差额，或者应该直接 <code>drop</code> 掉。</li>
+</ol>
+<h3 id="46">4.6 数据源</h3>
+<table>
+<thead>
+<tr>
+<th>用途</th>
+<th>源</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>历史 K 线</td>
+<td><code>data.binance.vision</code>（按月/按日 zip）</td>
+<td>当日 zip 次日约 09:44（北京）才发布</td>
+</tr>
+<tr>
+<td>尾段补数</td>
+<td><code>data-api.binance.vision/api/v3/klines</code></td>
+<td><strong>国内可直连</strong>，<code>api.binance.com</code> 会 502，别用</td>
+</tr>
+<tr>
+<td>HYPE</td>
+<td>Hyperliquid <code>candleSnapshot</code></td>
+<td>原生 API，免地域封锁</td>
+</tr>
+</tbody>
+</table>
+<p>两条腿缺一不可：历史走静态归档（稳、但要等一天），尾段走 API（新、但只收已收盘 bar）。</p>
+<p><strong>未收盘的 bar 必须剔除</strong>——回测里的 bar 天然都是收盘的，实盘不是。未收盘那根是未来函数。</p>
+<h3 id="47">4.7 项目自带的四个陷阱（改代码前必读）</h3>
+<ol>
+<li><strong>脚本全靠相对路径</strong>读写 <code>_signal.json</code> / <code>signal_now.html</code> / <code>.cache_binance</code> / <code>.notify_state.json</code>。工作目录必须是本项目根，否则找不到文件。</li>
+<li><strong>本机 Python 用独立安装</strong>：<code>C:\Users\archimond\AppData\Local\Programs\Python\Python313\python.exe</code>。不要用 WorkBuddy 自带的（路径含版本号，升级即失效）。</li>
+<li><strong>Windows 下写 <code>.cmd</code> / <code>.ps1</code> 一律纯 ASCII + CRLF</strong>。时间戳交给 Python 打，cmd 的 <code>%DATE%</code> 带 GBK 星期，会污染 UTF-8 日志。</li>
+<li><strong><code>schtasks.exe</code> 在沙箱黑名单里</strong>，用 PowerShell ScheduledTasks 模块的 cmdlet。</li>
+</ol>
+<hr />
+<h2 id="5">5. 实测业绩</h2>
+<h3 id="51-a-50">5.1 逐年（口径 A：本金恒 50 万、每年提走、收益率简单相加）</h3>
+<table>
+<thead>
+<tr>
+<th>年</th>
+<th>收益</th>
+<th>年内回撤</th>
+<th>盈亏</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2020（9 月起 4 个月）</td>
+<td>+44.4%</td>
+<td>−20.4%</td>
+<td>+22.2 万</td>
+</tr>
+<tr>
+<td>2021</td>
+<td>+139.3%</td>
+<td>−19.9%</td>
+<td>+69.7 万</td>
+</tr>
+<tr>
+<td>2022</td>
+<td><strong>−44.9%</strong></td>
+<td>−49.1%</td>
+<td>−22.5 万</td>
+</tr>
+<tr>
+<td>2023</td>
+<td>+224.5%</td>
+<td>−17.2%</td>
+<td>+112.3 万</td>
+</tr>
+<tr>
+<td>2024</td>
+<td>+122.0%</td>
+<td>−37.3%</td>
+<td>+61.0 万</td>
+</tr>
+<tr>
+<td>2025</td>
+<td><strong>−2.5%</strong></td>
+<td>−29.0%</td>
+<td>−1.2 万</td>
+</tr>
+<tr>
+<td>2026（至 11 月）</td>
+<td>+98.3%</td>
+<td>−13.3%</td>
+<td>+49.1 万</td>
+</tr>
+<tr>
+<td><strong>合计</strong></td>
+<td></td>
+<td></td>
+<td><strong>+291 万</strong></td>
+</tr>
+</tbody>
+</table>
+<p>年胜率 <strong>5/7（71%）</strong>，亏损年 2022（−52.4%）与 2025（−9.6%）。</p>
+<blockquote>
+<p>三档对照的年胜率：DN<strong>0.0</strong> 是 6/7（2025 年 +4.2% 勉强为正）、DN<strong>0.5</strong> 是 5/7（2025 −2.5%）、
+DN<strong>1.0</strong> 也是 5/7（2025 −9.6%）。<strong>半仓正好落在「2025 由正转负」的临界点上。</strong></p>
+</blockquote>
+<h3 id="52">5.2 回撤的真实形状</h3>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>最大回撤</td>
+<td>−54.9%</td>
+</tr>
+<tr>
+<td>峰值</td>
+<td>2021-11-08（净值 4.242）</td>
+</tr>
+<tr>
+<td>谷底</td>
+<td>2022-12-19（1.912），下跌 <strong>406 天</strong></td>
+</tr>
+<tr>
+<td>恢复</td>
+<td>2023-10-23（4.334），自谷底 <strong>308 天</strong></td>
+</tr>
+<tr>
+<td>全程</td>
+<td><strong>714 天 ≈ 2 年</strong></td>
+</tr>
+<tr>
+<td>同期基准</td>
+<td>峰→谷 BTC <strong>−75.7%</strong>；峰→恢复 BTC 仍 <strong>−51.0%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>亏损归因</strong>：BTC −18.1pp + ETH −11.2pp = <strong>−29.3pp</strong>，占加权合计 −36.7% 的 <strong>80%</strong>（两者权重合计 41%）。分状态看：UP 段 <strong>−30.9%</strong>、RANGE <strong>−19.7%</strong>、DOWN 反而 <strong>+5.7%</strong>。峰值日整体敞口只有 <strong>0.56×</strong>。</p>
+<blockquote>
+<p><strong>RANGE 段从 −11.0%（DN=0）恶化到 −19.7%（DN=0.5），DN=1.0 时是 −30.3% —— 这是 2026-11-20 改动的直接后果。</strong>
+上一版不给 DOWN→RANGE 底仓，2022 年的横盘阴跌里策略是半空的；现在给半仓，
+于是 UP 和 RANGE 两个状态同时在挨打。<strong>RANGE 的恶化和系数严格成比例</strong>（0 → 0.5 → 1.0 对应
+−11.0% → −19.7% → −30.3%），这是「加底仓 = 加 beta」最干净的证据。</p>
+</blockquote>
+<p>结论：这不是"仓位太大"（峰值杠杆仅 0.56×），是"判了 UP/RANGE 却带着仓位在跌"（状态机滞后）+ "空头对冲太弱"。</p>
+<h3 id="53">5.3 分币种（各自独立净值，同规则同权重口径）</h3>
+<p>DOGE 168.68× · SOL 40.90× · NEAR 29.53× · BTC 25.84× · BNB 16.41× · XRP 9.48× · ETH 6.03× · UNI 5.29× · ZEC 3.55× · AAVE 2.08× · HYPE 1.76× · LINK 1.15×</p>
+<p><strong>12/12 正收益，中位 9.48×</strong>。LINK 是全组最弱（1.15×，最大回撤 −87.4%）——DN=1.0 时它会跌破 1（0.79×），
+半仓把它勉强拉回正值，这就是 0.5 档的实际价值。</p>
+<p>单币回撤普遍 −59%~−87%（LINK −87.4%、ZEC −82.5%、ETH −79.9%，最轻的 HYPE 也有 −36.4%），单币不可承受，必须组合。</p>
+<h3 id="54">5.4 三个口径，别混</h3>
+<table>
+<thead>
+<tr>
+<th>口径</th>
+<th>数字</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A</strong> 本金恒 50 万、每年提走、收益率简单相加</td>
+<td><strong>+291 万</strong></td>
+<td>本报告主口径，跨年可比</td>
+</tr>
+<tr>
+<td><strong>B</strong> 全复利 + 每年按当年本金重算权重（受容量约束）</td>
+<td><strong>5.82×</strong>，年化 +32.8%，回撤 −41.6%，Calmar 0.79</td>
+<td><strong>对外报收益必须用这个</strong> —— 但见下方版本注</td>
+</tr>
+<tr>
+<td>C 权重恒 50 万却跑全复利</td>
+<td>28.0×</td>
+<td><strong>幻觉，不能用</strong>。它假设净值涨到 1399 万时单笔仍是 50 万量，冲击超红线十倍</td>
+</tr>
+</tbody>
+</table>
+<p><code>Calmar = 复利年化 / 最大回撤</code>。横向比较规则时用口径 C 的 Calmar（<strong>1.29</strong>），因为历史实验脚本全是同口径；对外讲收益必须用 B。</p>
+<blockquote>
+<p><strong>口径 B 的版本注（重要）</strong>：5.82× 是 <strong>2026-11-19 版本</strong>（RANGE 按来路打折，DOWN=0.0）测得的。
+2026-11-20 两次调整后（先 1.0、后折中 0.5），口径 A 从 261 万到 291 万（若取 1.0 则 318 万）、
+口径 C 回撤从 −48.2% 恶化到 −54.9%（1.0 时 −61.2%），
+<strong>口径 B 必然同步变化，但当前没有可重跑的脚本</strong>（原计算脚本未保留）。在重算之前，
+不要把 5.82× 当作新版本的对外数字；新版本只能用口径 A 的 <strong>+291 万</strong> 或口径 C 的相对比较。</p>
+<p>方向上可以预期：口径 B 的收益会上升、回撤会恶化、Calmar 会下降 —— 与口径 C 同向。</p>
+<p><strong>口径 C 的 Calmar 只用于排序，不能当业绩。</strong> 这一点在内部犯过一次错——曾把 24.79× 报成口径 B。</p>
+</blockquote>
+<hr />
+<h2 id="6">6. 优势</h2>
+<h3 id="61">6.1 熊市里的相对优势是真的</h3>
+<table>
+<thead>
+<tr>
+<th>期间</th>
+<th>BTC</th>
+<th>策略</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2021-11 → 2022-12（熊市）</td>
+<td>−75.7%</td>
+<td><strong>−54.9%</strong></td>
+</tr>
+<tr>
+<td>2021-11 → 2023-10（到策略回本）</td>
+<td>−51.0%</td>
+<td><strong>+6.3%</strong></td>
+</tr>
+</tbody>
+</table>
+<p>策略只承受了市场跌幅的 64%，并且比大盘早一年半回到前高。这不是运气——空头层在 2022 年贡献 +5.7%，VT60 又把高波动币的仓位压下来了。</p>
+<h3 id="62">6.2 规则全部可复核，没有黑箱</h3>
+<p>每个状态切换都有 <code>triggers</code> 记录（<code>ma60_cross_up</code> / <code>div_fail_top</code> / <code>cross_fix_down</code> …），每笔交易都有入场价、止损价、R 倍数、突破幅度。<strong>任何一天的仓位都能倒推出来为什么</strong>。</p>
+<h3 id="63">6.3 出场结构是"凸"的</h3>
+<p>75% 的单子止损（每笔 −1R），15% 的翻转单贡献 +1547R。这个结构意味着：<strong>你不需要判断对很多次，只需要让对的那几次跑完</strong>。心理压力反而小于高胜率策略——因为亏损是常态，不会产生"我明明一直对"的错觉。</p>
+<h3 id="64-w">6.4 容量：Σw 随本金单调下降，这是硬约束</h3>
+<p>总权重 Σw（= 实际投入比例，其余是现金）实测：</p>
+<table>
+<thead>
+<tr>
+<th>本金</th>
+<th>Σw</th>
+<th>BTC</th>
+<th>HYPE</th>
+<th>最大单笔冲击</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5 万</td>
+<td><strong>100.0%</strong></td>
+<td>9.2%</td>
+<td>9.2%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>20 万</td>
+<td><strong>100.0%</strong></td>
+<td>17.2%</td>
+<td>17.2%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>50 万</td>
+<td>85.4%</td>
+<td>25.0%</td>
+<td>25.0%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>80 万</td>
+<td>72.1%</td>
+<td>25.0%</td>
+<td>25.0%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>90 万</td>
+<td>68.1%</td>
+<td>23.4%</td>
+<td>25.0%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>100 万</td>
+<td>63.8%</td>
+<td>21.1%</td>
+<td>25.0%</td>
+<td>3.00%</td>
+</tr>
+<tr>
+<td>200 万</td>
+<td><strong>32.2%</strong></td>
+<td>10.5%</td>
+<td>12.8%</td>
+<td>3.00%</td>
+</tr>
+</tbody>
+</table>
+<p>三点结论：</p>
+<ol>
+<li><strong>20 万以内可以满仓</strong>（Σw = 100%，走等权表，每币 9.2%）。</li>
+<li><strong>50 万时已有 14.6% 现金</strong>，这是容量约束的必然结果，不是保守。</li>
+<li><strong>BTC 的 25% 上限在约 87 万处失效</strong>，之后权重被动下降。200 万时 Σw 只剩 32.2%——不是不能跑，是三分之二的钱必须躺着。</li>
+</ol>
+<p>注意最右列：<strong>任意本金下冲击都恰好压在 3.00% 红线</strong>。这说明权重表是被容量"撑满"的，不是拍脑袋分配的。想提高资金效率只有一条路——提高单笔冲击容忍度（代价是滑点）。</p>
+<h3 id="65">6.5 执行成本极低</h3>
+<p>每天 6 次信号，绝大多数是"不动"。12 币组合 6.21 年累计 1668 笔加仓层交易，折合<strong>每年约 270 笔、每月约 22 笔</strong>。每天花 5 分钟核对工单即可，不需要盯盘。</p>
+<hr />
+<h2 id="7">7. 劣势</h2>
+<p><strong>这一节比优势重要。</strong> 下面每一条都是实测出来的，不是推测。</p>
+<h3 id="71">7.1 状态机滞后是结构性缺陷，且无法用"加补丁"修复</h3>
+<p>2022 年亏损 86% 来自 BTC/ETH 在 UP 状态下扛跌。这是 MA120/MA60 + 两日确认的固有代价——<strong>要确认趋势，就必须等</strong>。</p>
+<p>四次尝试修复，全部失败：</p>
+<blockquote>
+<p><strong>读表注意</strong>：下表的金额与 Calmar 都是<strong>实验当时那一版的口径</strong>（当时 RANGE 底仓系数不同、
+币种组合也不同），只能用来看「相对好坏」，<strong>不能与当前版本的 +291 万 / −54.9% 直接比大小</strong>。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>尝试</th>
+<th>方法</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MA50 闸门</td>
+<td>价格跌破 MA50 时底仓打折</td>
+<td>去前视后不如不开（277 万 vs 310 万）</td>
+</tr>
+<tr>
+<td>ATR 吊灯</td>
+<td>浮盈回撤 1.5×ATR 减半</td>
+<td>即时 548 万 → 平移一格 187 万（前视污染）</td>
+</tr>
+<tr>
+<td>20 根极值通道</td>
+<td>RANGE 内跌破前 20 根下沿减仓</td>
+<td>触发仅 5.1%，289 万 vs 无脑折扣 312 万</td>
+</tr>
+<tr>
+<td>组合级回撤熔断</td>
+<td>组合回撤 &gt;25% 砍半仓</td>
+<td>全样本 Calmar 1.40→1.69，但<strong>2023 起 2.15 vs 2.35</strong></td>
+</tr>
+</tbody>
+</table>
+<p>最后一行的教训最贵：<strong>熔断的全部增益来自 2022 一次事件，换起点就归零。</strong> 6.2 年只触发 4 次，样本量 n=1。</p>
+<h3 id="72">7.2 分散化已到数学上限，没有更多可榨</h3>
+<p>12 币日收益平均相关系数：</p>
+<table>
+<thead>
+<tr>
+<th>2021 牛市</th>
+<th>2025 横盘</th>
+<th><strong>2022 熊市</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.47</td>
+<td>0.64</td>
+<td><strong>0.72</strong></td>
+</tr>
+</tbody>
+</table>
+<p>2022 年 12 币<strong>全部下跌，无一例外</strong>（BNB −53% 最好，SOL −94% 最差）。</p>
+<p>ρ=0.72 时 12 币等权的理论分散极限 = √(0.72 + 0.28/12) = <strong>0.86× 单币波动</strong>。
+当前（DN=0.5）实测组合 −54.9% vs 单币中位 −74.1% = <strong>0.74×</strong>，比极限低 14%。</p>
+<table>
+<thead>
+<tr>
+<th>RANGE DOWN 系数</th>
+<th>组合回撤</th>
+<th>单币中位</th>
+<th>比值</th>
+<th>距极限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.0</td>
+<td>−48.2%</td>
+<td>−70.0%</td>
+<td>0.69×</td>
+<td>−20%</td>
+</tr>
+<tr>
+<td><strong>0.5（现用）</strong></td>
+<td><strong>−54.9%</strong></td>
+<td><strong>−74.1%</strong></td>
+<td><strong>0.74×</strong></td>
+<td><strong>−14%</strong></td>
+</tr>
+<tr>
+<td>1.0</td>
+<td>−61.2%</td>
+<td>−77.7%</td>
+<td>0.79×</td>
+<td>−8.6%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>三档都没有突破理论极限，但余量从 20% 一路缩到 8.6%</strong> —— 这说明加回来的 RANGE 底仓
+吃掉了一部分分散化红利：它和核心 4 币同涨同跌，没有带来新的低相关暴露。
+系数越高，组合就越接近「单币波动的等权平均」，分散化的那点好处被自己抵消掉。</p>
+<p>这解释了为什么六种权重改法（降 SINGLE_CAP、HYPE 降权、给 BTC、样本长度折扣、归一化、HYPE 归零）<strong>Calmar 全部落在 1.29~1.40，没有一组超过基线</strong>。</p>
+<p><strong>结论：想再降回撤只有两条路——降总敞口（等比付钱、Calmar 不变）或引入 ρ&lt;0.3 的跨资产（本策略框架之外）。</strong></p>
+<h3 id="73-123">7.3 空头效率只有多头的 1/2.3</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>笔数</th>
+<th>盈亏比 PF</th>
+<th>平均 R</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>多头</td>
+<td>818</td>
+<td><strong>2.26</strong></td>
+<td>+0.97R</td>
+</tr>
+<tr>
+<td>空头</td>
+<td>850</td>
+<td><strong>1.58</strong></td>
+<td>+0.43R</td>
+</tr>
+</tbody>
+</table>
+<p>敞口比 3.04× vs 0.42×（<strong>7.28 倍</strong>）。根因：DOWN 占 43.6% 时间（最高），但状态内单根漂移只有 +0.0094%（几乎零），而 UP 是 +0.0626%。</p>
+<p>提高空头敞口已被否决（八臂全部变差），所以这个不对称是<strong>已知且接受的</strong>。</p>
+<h3 id="74">7.4 加仓层单独看几乎不赚钱</h3>
+<p>只留加仓层（去掉底仓）只有 42 万 vs 完整 310 万。损失 268 万里：底仓贡献 234 万（87%），协同贡献 34 万（13%）。</p>
+<p>加仓层在场时间仅 <strong>42%</strong>（状态允许的 111,320 根里只有 47,220 根）。它的作用不是自己赚钱，而是<strong>在趋势确认后放大底仓的收益</strong>。</p>
+<h3 id="75">7.5 容量模型有一个已知漏算</h3>
+<p>峰值敞口应该是 <code>w × 1.5 × HI × κ</code>，账面只用 <code>w × 1.5 × κ</code>，<strong>低估 33%</strong>。目前靠"单笔冲击红线 3% + 14.6% 现金"缓冲着，实际影响不大，但这是一个待修的口径错误。</p>
+<h3 id="76">7.6 滑点假设仍是假想值</h3>
+<p><code>COST = 0.0004</code>（单边 4bp），<code>_fills.jsonl</code> 至今为空——<strong>没有一笔真实成交记录</strong>。这意味着所有回测收益都建立在假设成本上。以 BTC 永续的流动性，4bp 对小单是保守的，但对需要拆单的大单可能不够。</p>
+<h3 id="77-4h">7.7 4H 级风控在人工执行路径上不可实现</h3>
+<p>所有"4H 级别连续风控"（ATR 吊灯、回撤熔断、极值通道）的收益都卡在同一件事上：<strong>晚一根 4H 就崩</strong>。</p>
+<p>实测：ATR 择时立即执行 548 万，晚一根 4H 变 187 万。15 组 MA×滞回参数扫描，<strong>无一</strong>能在晚一根下优于不开闸门。</p>
+<p>这不是规则问题，是执行问题。<strong>想要这部分收益，必须先有程序化下单。</strong> 这是 P0 级待办。</p>
+<h3 id="78">7.8 三种"看起来有用"的路已经证伪，别再试</h3>
+<ol>
+<li><strong>预测 RANGE 往哪边破</strong>（MA50 闸门 / ATR 吊灯 / 20 根极值）——三次同一结论，全部负价值</li>
+<li><strong>提高空头敞口</strong>——单位敞口效率单调崩塌</li>
+<li><strong>组合级回撤熔断 / 调权重</strong>——增益只来自 2022 单次事件，换起点归零</li>
+</ol>
+<p>成功的只有一件事：<strong>按来路分类（UP→RANGE vs DOWN→RANGE），而不是预测</strong>。</p>
+<blockquote>
+<p><strong>但这条后来也被放弃了。</strong> 2026-11-20 用户要求「震荡一律允许开底仓」，<code>DOWN</code> 系数从 0.0 改回 1.0。
+三臂复测显示它确实是"分类而不是预测"，但分类本身没有 alpha——两类 RANGE 的差异全部来自
+底仓敞口大小，收益和回撤同步放大（Calmar 0.90 → 0.75）。详见 §3.1。</p>
+</blockquote>
+<hr />
+<h2 id="8">8. 参数总表</h2>
+<h3 id="81-bt_skeletonpy">8.1 交易参数（<code>bt_skeleton.py</code>）</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>可调</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LOOKBACK</code></td>
+<td>20</td>
+<td>谨慎</td>
+<td>突破回看根数（4H）</td>
+</tr>
+<tr>
+<td><code>ATR_K</code></td>
+<td>1.5</td>
+<td>谨慎</td>
+<td>止损宽度（× ATR14）</td>
+</tr>
+<tr>
+<td><code>MAX_BARS</code></td>
+<td>120</td>
+<td>否</td>
+<td>时间兜底（4H 根数）= 20 天</td>
+</tr>
+<tr>
+<td><code>ADD</code></td>
+<td>0.5</td>
+<td>否</td>
+<td>加仓层倍数</td>
+</tr>
+<tr>
+<td><code>VOL_Q</code></td>
+<td>0.85</td>
+<td>谨慎</td>
+<td>ATR 分位过滤阈值</td>
+</tr>
+<tr>
+<td><code>COST</code></td>
+<td>0.0004</td>
+<td>否</td>
+<td>单边成本</td>
+</tr>
+<tr>
+<td><code>FUND_DAILY</code></td>
+<td>0.0003</td>
+<td>否</td>
+<td>资金费 3bp/日 ≈ 11%/年</td>
+</tr>
+<tr>
+<td><code>TRAIL_K</code></td>
+<td>0</td>
+<td>已关</td>
+<td>追踪止损</td>
+</tr>
+<tr>
+<td><code>EARLY_N</code></td>
+<td>0</td>
+<td>已关</td>
+<td>早期淘汰</td>
+</tr>
+<tr>
+<td><code>BLOCK_INIT</code></td>
+<td>True</td>
+<td>可用 <code>SKEL_BLOCK_INIT=0</code> 关</td>
+<td>init 血统禁开新仓</td>
+</tr>
+</tbody>
+</table>
+<h3 id="82">8.2 状态机参数</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ma_slow</code> / <code>ma_fast</code></td>
+<td>120 / 60</td>
+<td>日线；周线按 ÷5 映射为 24 / 12，<strong>自由度为 0，不许单独调</strong></td>
+</tr>
+<tr>
+<td><code>ob</code> / <code>os</code></td>
+<td>70 / 30</td>
+<td>RSI 阈值</td>
+</tr>
+<tr>
+<td><code>confirm</code></td>
+<td>2</td>
+<td>连续确认日数</td>
+</tr>
+<tr>
+<td><code>cross_fix</code></td>
+<td>True</td>
+<td>趋势态 MA60 纠错</td>
+</tr>
+<tr>
+<td><code>cross_fix_init</code></td>
+<td><strong>False</strong></td>
+<td>init 血统 MA60 纠错（未通过样本外，勿开）</td>
+</tr>
+<tr>
+<td><code>div_no_same</code></td>
+<td><strong>False</strong></td>
+<td>同向背离去重（未验证，勿开）</td>
+</tr>
+<tr>
+<td><code>warm_cross</code></td>
+<td><strong>False</strong></td>
+<td>热身冷却（10 币样本外 6 改善/4 变差，输的一侧幅度压倒性，勿开）</td>
+</tr>
+<tr>
+<td><code>trend_flat</code></td>
+<td>False</td>
+<td>盘整识别</td>
+</tr>
+<tr>
+<td><code>div_expiry_days</code></td>
+<td>None</td>
+<td>背离过期</td>
+</tr>
+</tbody>
+</table>
+<h3 id="83">8.3 位置参数</h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SINGLE_CAP</code></td>
+<td>0.25</td>
+<td>单币权重上限（<strong>已实测不应调整</strong>，见 §7.2）</td>
+</tr>
+<tr>
+<td><code>MAX_IMPACT</code></td>
+<td>0.03</td>
+<td>单笔冲击红线</td>
+</tr>
+<tr>
+<td><code>RANGE_RATIO_BY_SRC</code></td>
+<td><code>{"UP":1.0, "DOWN":0.5}</code></td>
+<td>RANGE 底仓系数（UP 满仓 / DOWN 半仓；改 0.0 低回撤、改 1.0 满仓）</td>
+</tr>
+<tr>
+<td><code>BASE_RATIO</code> / <code>ADD_RATIO</code></td>
+<td>1.0 / 0.5</td>
+<td>底仓 / 加仓倍数</td>
+</tr>
+<tr>
+<td><code>ALLOW_SHORT</code></td>
+<td>True</td>
+<td>False = 纯现货模式（DOWN 清仓不做空）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="84">8.4 一个必须记住的坑：前视</h3>
+<p>回测约定 <code>nav *= 1 + pos[k] * r[k]</code>，其中 <code>r[k] = close[k]/close[k-1] - 1</code>。
+所以 <code>pos[k]</code> 必须在 <code>close[k]</code> <strong>之前</strong>就已经决定。</p>
+<ul>
+<li>用 <code>close[k-1]</code> 及更早的数据 → 天然正确</li>
+<li>用 <code>close[k]</code> 计算 → <strong>必须左移一格</strong>才能作用于 <code>r[k]</code></li>
+</ul>
+<p><code>base_gate</code> 曾用 <code>close[k]</code> 与 MA50 比较却直接乘进 <code>r[k]</code>，造成一格前视。修正前后的差距：</p>
+<table>
+<thead>
+<tr>
+<th>写法</th>
+<th>累计</th>
+<th>2022</th>
+<th>2025</th>
+<th>回撤</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>不开闸门</td>
+<td>310 万</td>
+<td>+145.3%</td>
+<td>−9.7%</td>
+<td>−60.7%</td>
+</tr>
+<tr>
+<td>含前视（曾汇报的）</td>
+<td>378 万</td>
+<td>+213.9%</td>
+<td>+10.6%</td>
+<td>−30.6%</td>
+</tr>
+<tr>
+<td><strong>去前视（正确）</strong></td>
+<td><strong>277 万</strong></td>
+<td>+149.6%</td>
+<td>−1.8%</td>
+<td>−52.5%</td>
+</tr>
+</tbody>
+</table>
+<p>前视虚增 101 万。<strong>任何自定义风险规则都必须做"平移一格"回归检查。</strong></p>
+<hr />
+<h2 id="9">9. 已知未解决问题</h2>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>问题</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0</strong></td>
+<td>执行通道未自动化，4H 级风控无法落地</td>
+<td>所有 4H 级规则的收益都卡在这里</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>ATR 分位过滤对空头方向可能是反向的</td>
+<td>若确认可单独提高空头效率，无需加杠杆</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>容量模型漏算 HI（低估峰值敞口 33%）</td>
+<td>大资金时有超限风险</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>空头资金费符号是假设（空头应付还是应收未校准）</td>
+<td>影响空头净收益</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>滑点 A=100 仍是假想值，<code>_fills.jsonl</code> 为空</td>
+<td>回测收益建立在假设成本上</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>PC.CAPITAL</code> 仍是固定 5000；<code>bt_skeleton.COINS</code> 仍是旧 10 币（含 CRV）</td>
+<td>两处与当前 12 币组合不一致，故意未动</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>init 血统死锁未根治（只做了"禁开新仓"）</td>
+<td>新币上线初期仍可能整段误判</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10">10. 变更历史要点</h2>
+<table>
+<thead>
+<tr>
+<th>日期</th>
+<th>提交</th>
+<th>变更</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-11-17</td>
+<td><code>5762212</code></td>
+<td>引入「血统」+ <code>BLOCK_INIT</code></td>
+<td>HYPE 锁死 48 天做空 4 次全止损</td>
+</tr>
+<tr>
+<td>2026-11-17</td>
+<td><code>2db479b</code></td>
+<td>判定起点统一为 <code>ma_slow</code></td>
+<td>每个 2024 年前有前史的品种都被凭空塞 init 状态</td>
+</tr>
+<tr>
+<td>2026-11-17</td>
+<td><code>3697fa1</code></td>
+<td>热身冷却（默认关）</td>
+<td>样本外 6 改善 / 4 变差，输的一侧压倒性</td>
+</tr>
+<tr>
+<td>2026-11-17</td>
+<td><code>4c5174a</code></td>
+<td><code>cross_fix_init</code>（默认关）</td>
+<td>22 品种首段同向率 4 改善 / 5 变差</td>
+</tr>
+<tr>
+<td>2026-11-18</td>
+<td><code>36aca8f</code></td>
+<td>底仓趋势闸门作废</td>
+<td>前视：去前视后不如不开</td>
+</tr>
+<tr>
+<td>2026-11-19</td>
+<td><code>e24a966</code></td>
+<td>RANGE 按来路打折（UP=1.0 / DOWN=0.0）</td>
+<td>203 vs 200 段实测，Calmar 0.74→0.89</td>
+</tr>
+<tr>
+<td>2026-11-20</td>
+<td>—</td>
+<td>RANGE 一律 1.0（当日改，同日又被下一条覆盖）</td>
+<td>用户要求震荡一律允许开底仓；三臂复测确认这是加 beta 不是加 alpha</td>
+</tr>
+<tr>
+<td>2026-11-20</td>
+<td>—</td>
+<td><strong>RANGE 折中 DOWN=0.5（当前生效）</strong></td>
+<td>相对 DN1.0：少赚 28 万、回撤收窄 6.7pp、口径 C Calmar 1.18→1.29；相对 DN0.0：多赚 28 万、回撤加深 6.7pp</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_2">附：快速开始</h2>
+<pre><code class="language-bash">cd C:\Users\archimond\PycharmProjects\pythonProject2\boros_funding_arbitrage\regime_rsi_ema_strategy
+
+# 1. 看当前该做什么
+python live_signals.py
+python gen_signal_html.py       # 生成 signal_now.html
+start signal_now.html
+
+# 2. 看未结算工单
+python ticket.py list
+
+# 3. 日常运行（选一个）
+python monitor.py               # 常驻
+deploy\task_ctl.cmd on          # 或启用计划任务
+
+# 4. 复核业绩
+python _report_latest.py
+</code></pre>
+<p><strong>第一次使用前</strong>：在脚本同目录建 <code>_mail.json</code>：</p>
+<pre><code class="language-json">{&quot;host&quot;:&quot;smtp.qq.com&quot;,&quot;port&quot;:465,
+ &quot;user&quot;:&quot;你的QQ邮箱&quot;,&quot;pass&quot;:&quot;QQ邮箱授权码（不是登录密码）&quot;,
+ &quot;to&quot;:[&quot;收件邮箱&quot;]}
+</code></pre>
+<p>授权码获取：QQ 邮箱 → 设置 → 账户 → POP3/SMTP 服务 → 开启 → 生成授权码。</p>
+</div>
+</body>
+</html>

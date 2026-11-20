@@ -1,0 +1,23 @@
+{
+ "_说明": "复制成 holdings.json 再填真实数据。holdings.json 已被 .gitignore 忽略（本仓库是 public），不要把真实持仓提交上去。",
+ "_字段": {
+  "as_of": "持仓快照日期 YYYY-MM-DD，只是标注，不参与计算",
+  "c": "币种短代码，必须能在 fetch_binance_vision.SYMBOLS 里找到",
+  "qty": "持有数量（币本位，不是 U）",
+  "cost": "买入均价（单价 U），不是总成本"
+ },
+ "_示例": "qty=0.5, cost=60000 → 总成本 30000 U；现价 63000 → 市值 31500 U，浮盈 +1500 U",
+ "as_of": "2026-01-01",
+ "holdings": [
+  {"c": "BTC", "qty": 0.5, "cost": 60000.0},
+  {"c": "ETH", "qty": 10.0, "cost": 2500.0},
+  {"c": "AAVE", "qty": 50.0, "cost": 100.0},
+  {"c": "LINK", "qty": 500.0, "cost": 12.0},
+  {"c": "PENDLE", "qty": 1000.0, "cost": 3.0},
+  {"c": "RENDER", "qty": 800.0, "cost": 7.0},
+  {"c": "ONDO", "qty": 3000.0, "cost": 0.8},
+  {"c": "ACH", "qty": 100000.0, "cost": 0.02},
+  {"c": "LPT", "qty": 300.0, "cost": 13.0},
+  {"c": "SSV", "qty": 100.0, "cost": 25.0}
+ ]
+}

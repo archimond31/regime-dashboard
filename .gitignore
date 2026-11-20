@@ -246,3 +246,36 @@ _base_gate.json
 !_exp_range_src.py
 !_exp_range_src2.py
 !_verify_range_src.py
+!_report_latest.py
+!_diag_dd.py
+!_exp_dd_brake.py
+!_verify_dd_brake.py
+!_exp_weight_cap.py
+!_exp_weight_quality.py
+!_diag_corr.py
+# 策略说明书（对外文档）+ 生成脚本
+!STRATEGY.md
+!STRATEGY.html
+!_md2html.py
+# 杠杆上限研究（三个天花板 + 本金×杠杆矩阵）
+!_exp_leverage.py
+!_exp_capital_lev.py
+
+# ---------------------------------------------------------------------------
+# 持仓监控（2026-11-19）
+#   ！！本仓库 regime-dashboard 是 PUBLIC（GitHub Pages）！！
+#   下面这些文件含有真实持仓数量、成本价、账户总市值与浮亏，
+#   一旦提交就是公开泄露。永远不要给它们加 ! 白名单。
+# ---------------------------------------------------------------------------
+holdings.json
+holdings_now.json
+holdings_now.html
+.holdings_state.json
+_hold*.png
+holding_*.png
+# 只提交代码和脱敏模板
+!holdings_watch.py
+!holdings.example.json
+
+# RANGE 一律 1.0 的三臂对照（2026-11-20）
+!_exp_range_all.py

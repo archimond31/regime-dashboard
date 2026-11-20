@@ -67,6 +67,14 @@ SYMBOLS = {
     "NEAR": "NEARUSDT",     # 新 L1
     "SAND": "SANDUSDT",     # 游戏/元宇宙
     "ZEC": "ZECUSDT",       # 隐私币（2026-11 评估加入）
+    # ---- 持仓监控专用（2026-11-19）：给 holdings_watch.py 用，不进 12 币策略组合
+    "PENDLE": "PENDLEUSDT",
+    "RENDER": "RENDERUSDT",     # 2024-07-23 由 RNDR 改名，历史需与 RNDRUSDT 拼接
+    "RNDR": "RNDRUSDT",         # RENDER 的前身，仅用于拼接历史
+    "ONDO": "ONDOUSDT",
+    "ACH": "ACHUSDT",
+    "LPT": "LPTUSDT",
+    "SSV": "SSVUSDT",
 }
 
 # 各品种在 Binance 现货的上线月，用来缩短探测范围
@@ -93,6 +101,14 @@ LISTED_FROM = {
     "NEARUSDT": (2020, 8),
     "SANDUSDT": (2020, 6),
     "ZECUSDT": (2017, 8),
+    # ---- 持仓监控专用（上线月故意写早，404 只浪费一次请求；写晚才会静默丢样本）
+    "RNDRUSDT": (2020, 5),
+    "RENDERUSDT": (2024, 7),
+    "PENDLEUSDT": (2023, 6),
+    "ONDOUSDT": (2023, 12),
+    "ACHUSDT": (2021, 8),
+    "LPTUSDT": (2021, 10),
+    "SSVUSDT": (2021, 11),
 }
 
 _CACHE_TAIL = {}

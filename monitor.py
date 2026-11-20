@@ -25,6 +25,7 @@
         deploy\\task_ctl.cmd off
 """
 import datetime as dt
+import json
 import logging
 import os
 import socket
@@ -36,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOGDIR = os.path.join(HERE, "logs")
 LOG = os.path.join(LOGDIR, "monitor.log")
 LOCK_PORT = 47653          # 单实例锁：端口被占 = 已经有一个在跑了
+HOLD_STATE = os.path.join(HERE, ".holdings_state.json")   # 持仓监控「今天跑过没」
 UTC = dt.timezone.utc
 BJ = dt.timezone(dt.timedelta(hours=8))
 DELAY_MIN = 5              # 4H 收盘后再等 5 分钟（等交易所把最后一根 K 线落盘）
@@ -91,6 +93,40 @@ def run_once(logger):
     return r.returncode
 
 
+def run_holdings(logger):
+    """每日一次现货持仓监控（日线级别，不需要跟着 4H 跑）。
+
+    按北京日期去重：每天第一班（通常是北京 08:05）跑，之后几班直接跳过。
+    失败不写状态文件，下一班自动重试。
+    """
+    today_bj = dt.datetime.now(BJ).strftime("%Y-%m-%d")
+    try:
+        with open(HOLD_STATE, encoding="utf-8") as f:
+            if json.load(f).get("date") == today_bj:
+                return
+    except Exception:                       # noqa: BLE001  文件不存在/坏了都当没跑过
+        pass
+
+    logger.info("持仓监控：北京 %s 尚未跑过，开始", today_bj)
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    try:
+        r = subprocess.run([sys.executable, "-u", "holdings_watch.py", "--mail"],
+                           cwd=HERE, env=env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=900)
+    except Exception as e:                  # noqa: BLE001
+        logger.warning("持仓监控启动失败：%s: %s", type(e).__name__, e)
+        return
+    for line in ((r.stdout or "") + (r.stderr or "")).splitlines():
+        if line.strip():
+            logger.info("  " + line)
+    if r.returncode == 0:
+        with open(HOLD_STATE, "w", encoding="utf-8") as f:
+            json.dump({"date": today_bj,
+                       "ts": dt.datetime.now(BJ).strftime("%Y-%m-%d %H:%M")}, f)
+    else:
+        logger.warning("持仓监控失败，退出码 %s —— 下一班重试", r.returncode)
+
+
 def setup_log(logger):
     os.makedirs(LOGDIR, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s",
@@ -129,6 +165,10 @@ def main():
             run_once(logger)
         except Exception:                  # noqa: BLE001
             logger.exception("本轮抛出未捕获异常，已吞掉；下一班继续")
+        try:
+            run_holdings(logger)           # 每天一次，按北京日期去重
+        except Exception:                  # noqa: BLE001
+            logger.exception("持仓监控抛出未捕获异常，已吞掉；下一班继续")
 
     safe_run()
     if "--once" in sys.argv:

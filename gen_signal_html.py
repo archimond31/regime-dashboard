@@ -147,9 +147,9 @@ for o in COINS:
     _lock = o.get("blood_locked")
     st_tail = ('<div style="font-size:10px;color:#d32f2f;margin-top:2px;line-height:1.2">'
                '⚠ 初始化<br>不可纠错</div>' if _lock else "")
-    # RANGE 段的「来路」：2026-11-19 起底仓按来路打折（portfolio_config.RANGE_RATIO_BY_SRC）
-    #   UP→RANGE   保持 100%（实测段内平均 +8.78%，砍掉等于砍尾部收益）
-    #   DOWN→RANGE 归零（实测 +0.50%，零期望的纯波动）
+    # RANGE 段的「来路」：2026-11-20 起一律给满底仓（portfolio_config.RANGE_RATIO_BY_SRC
+    # 的 UP 与 DOWN 都是 1.0），所以这里只做展示，不再有「归零」红标。
+    # 保留 _rr<=0 分支作防御：将来若把 DOWN 调回 0，面板会自动恢复红标。
     _rr = o.get("range_ratio", 1.0)
     _src = o.get("range_src")
     if st == "RANGE" and _src:

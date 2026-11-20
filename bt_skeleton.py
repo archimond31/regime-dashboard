@@ -96,19 +96,24 @@ _BLOOD_CACHE = {}
 
 
 def range_ratio_series(rg4):
-    """逐 bar 的「RANGE 来路折扣」系数。**与闸门正交**，两者相乘。
+    """逐 bar 的「RANGE 底仓系数」。**与闸门正交**，两者相乘。
 
-    RANGE 段的底仓不再一律 1.0，而是看**进入 RANGE 之前那段是什么状态**：
-      UP→RANGE   保持 1.0（实测段内平均 +8.78%，赢面 47% 但赢时 +25.6%）
-      DOWN→RANGE 打 0   （实测段内平均 +0.50%，零期望的纯波动）
-    配置见 portfolio_config.RANGE_RATIO_BY_SRC。
+    【当前配置（2026-11-20 起）】UP 与 DOWN 都是 1.0 → 这个函数现在恒返回全 1.0，
+    等价于「震荡期一律持有满底仓」。保留这个函数是为了把「来路」这个信息留在
+    同一条管线上：改配置就能切换行为，不需要动 base_series / build / live_signals。
+
+    【历史】2026-11-19 曾设 DOWN→RANGE 打 0，依据是 12 币 403 段的统计
+    （UP→RANGE 平均 +8.78%，DOWN→RANGE 仅 +0.49% 且下跌占比 46%）。
+    2026-11-20 用户要求「震荡一律允许开底仓」，改回 1.0，
+    代价见 portfolio_config 注释里的三臂表（Calmar 0.90 → 0.75，回撤 −48.2% → −61.2%）。
 
     **无前视**：来路取 rg4[k-1]，是 bar k 开始前就已知的历史事实，
     所以 out[k] 直接作用于 bar k 的收益是对的，不需要左移一格。
-    （_exp_range_src.py 实测：原样 vs 左移一格只差 2~9 万，属噪声级。）
+    （_exp_range_all.py 实测：A2 臂原样 vs 左移一格差 0 万。）
 
     注意 RANGE 段内部必须**沿用进入时的来路**，不能每根重新看前一根 ——
-    否则第二根起前一根是 RANGE，来路就丢了，整段会退化成 1.0。
+    否则第二根起前一根是 RANGE，来路就丢了。当前配置下结果恒 1.0 看不出差别，
+    但一旦把 DOWN 调回 0.0，这个延续性就是正确性的关键。
     """
     import portfolio_config as PC
     out = [1.0] * len(rg4)
@@ -126,16 +131,17 @@ def range_ratio_series(rg4):
 
 
 def base_series(b4, d1, rg4):
-    """底仓系数序列 = 状态基础值 × 底仓闸门 × RANGE 来路折扣。**回测与实盘的唯一入口**。
+    """底仓系数序列 = 状态基础值 × 底仓闸门 × RANGE 系数。**回测与实盘的唯一入口**。
 
     · 状态基础值：UP/RANGE = 1.0，DOWN = 0.0（BASE 表）
     · 底仓闸门：价格跌破 MA50 时底仓打折（base_gate.py，默认已关闭）
-    · RANGE 来路折扣：DOWN→RANGE 打 0（portfolio_config.RANGE_RATIO_BY_SRC）
+    · RANGE 系数：当前配置恒 1.0（2026-11-20 起震荡一律给满底仓），
+                  字段保留以便改回「按来路打折」而无需动管线
 
     下标语义：返回值 k 是「在 bar k 期间生效」的系数，即乘在 r[k]=close[k]/close[k-1] 上。
     闸门内部已经左移一格（gate 是拿 close[k] 算的，只能作用于 bar k+1），
     这一步不做就是前视 —— 2026-11-18 为此把整条「底仓退出」结论推翻过一次，见 base_gate.py。
-    来路折扣不需要左移（只用 rg4[k-1]），所以两者可以安全相乘。
+    RANGE 系数不需要左移（只用 rg4[k-1]），所以两者可以安全相乘。
 
     实盘 live_signals.analyze() 走的是同一个 base_gate.next_gate()，
     只是它只需要最后一根的值（下一根才生效，天然无前视）。
@@ -325,8 +331,9 @@ def build(coin):
     sig, trades = signals(b4, rg4, atr, vol_q=VOL_Q, coin=coin)
 
     n = len(b4)
-    # 底仓 = 状态基础值 × RANGE 来路折扣（闸门已关闭，这里不叠加；
-    # 若将来开启闸门，必须改用 base_series(b4, d1, rg4) 以免两处口径分叉）
+    # 底仓 = 状态基础值 × RANGE 系数（当前恒 1.0，见 range_ratio_series）。
+    # 闸门已关闭，这里不叠加；若将来开启闸门，必须改用 base_series(b4, d1, rg4)
+    # 以免两处口径分叉（2026-11-19 踩过这个坑）。
     rr = range_ratio_series(rg4)
     base = [BASE.get(rg4[k], 0.0) * rr[k] for k in range(n)]
     pos = [base[k] + ADD * sig[k] for k in range(n)]

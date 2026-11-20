@@ -6,7 +6,7 @@
 
 【1】range_ratio_series() 的语义：RANGE 段内部沿用「进入时的来路」，不逐根重看
 【2】base_series() 与 build() 两条入口逐 bar 一致（这是最容易分叉的地方）
-【3】生产代码算出的组合净值 == 实验脚本的 261 万（口径必须完全对上）
+【3】生产代码算出的组合净值 == 实验脚本的 291 万（口径必须完全对上）
 【4】实盘链路（analyze 里 k_seg 回找来路）与回测逐 bar 一致
 【5】无前视：把 rg4 整体右移一格（模拟「晚一根才知道」），差异应在噪声级
 
@@ -117,6 +117,40 @@ print(f"  DOWN→RANGE {dn_ok}/{n_dn} 段系数 = {PC.RANGE_RATIO_BY_SRC['DOWN']
 if up_ok != n_up or dn_ok != n_dn:
     FAIL.append("[1] 来路映射不符")
 
+# 【加固】当前配置 UP/DOWN 都是 1.0，上面两项检查会退化成恒真，测不出
+# 「RANGE 段第二根起前一根已是 RANGE，来路丢失」这类 bug。这里临时把两个系数
+# 设成不同的值再跑一遍，验证「段内沿用进入时来路」的逻辑本身仍然正确。
+# 一旦将来把 DOWN 调回 0.0，这段就是真正的保护网。
+print("\n  【加固】临时配置 UP=1.0 / DOWN=0.25 重跑，验证段内延续逻辑")
+_save = dict(PC.RANGE_RATIO_BY_SRC)
+PC.RANGE_RATIO_BY_SRC.clear()
+PC.RANGE_RATIO_BY_SRC.update({"UP": 1.0, "DOWN": 0.25})
+hard_bad = 0
+try:
+    for c in ALL12:
+        rg4 = DATA[c]["rg4"]
+        rr = BT.range_ratio_series(rg4)
+        i = 1
+        while i < len(rg4):
+            if rg4[i] != "RANGE":
+                i += 1
+                continue
+            j = i
+            while j < len(rg4) and rg4[j] == "RANGE":
+                j += 1
+            want = {"UP": 1.0, "DOWN": 0.25}.get(rg4[i - 1])
+            if want is not None and set(rr[i:j]) != {want}:
+                hard_bad += 1
+                print(f"    ✗ {c} 来路{rg4[i - 1]} 段 [{i},{j}) 得到 {set(rr[i:j])}，"
+                      f"应为 {{{want}}}")
+            i = j
+finally:
+    PC.RANGE_RATIO_BY_SRC.clear()
+    PC.RANGE_RATIO_BY_SRC.update(_save)
+print(f"  加固检查：{'✓ 通过（段内沿用进入时来路，不漂移）' if hard_bad == 0 else f'✗ {hard_bad} 段失败'}")
+if hard_bad:
+    FAIL.append("[1] 段内延续逻辑失效（临时配置下暴露）")
+
 # ============================================================
 # 【2】base_series 与 build 一致
 # ============================================================
@@ -138,7 +172,7 @@ if diff_total:
     FAIL.append("[2] base_series 与 build 分叉")
 
 # ============================================================
-# 【3】组合净值复现 261 万
+# 【3】组合净值复现 291 万
 # ============================================================
 
 
@@ -235,9 +269,9 @@ yrs = len(cv_new) / 252.0
 cagr = (cv_new[-1][1] / cv_new[0][1]) ** (1 / yrs) - 1
 print(f"\n  累计 {cum / 1e4:.0f} 万（口径 A）   回撤 {dd * 100:.1f}%   "
       f"复利年化 {cagr * 100:+.1f}%   Calmar {cagr / abs(dd):.2f}")
-EXPECT_CUM = 261e4
+EXPECT_CUM = 291e4       # 2026-11-20 折中档 DOWN=0.5 → 291 万（DN1.0=318 万 / DN0.0=261 万）
 ok3 = abs(cum - EXPECT_CUM) / EXPECT_CUM < 0.02
-print(f"  期望 261 万 ±2% → {'✓ 复现' if ok3 else '✗ 不一致'}")
+print(f"  期望 291 万 ±2% → {'✓ 复现' if ok3 else '✗ 不一致'}")
 if not ok3:
     FAIL.append("[3] 净值与实验不一致")
 
@@ -306,5 +340,6 @@ if FAIL:
     for f in FAIL:
         print("  ✗", f)
     sys.exit(1)
-print("全部通过。RANGE 来路折扣（UP=1.0 / DOWN=0.0）可以上线。")
+print("全部通过。RANGE 底仓系数（UP=%.2f / DOWN=%.2f）与回测、实盘三方口径一致。"
+      % (PC.RANGE_RATIO_BY_SRC["UP"], PC.RANGE_RATIO_BY_SRC["DOWN"]))
 print("=" * 96)

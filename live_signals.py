@@ -152,7 +152,9 @@ def analyze(c, now, prev_gate=None):
     o["regime_start"] = b4[min(k_seg, len(b4) - 1)]["date"]
 
     # RANGE 段的「来路」：进入 RANGE 之前那段是什么。
-    # 用于 portfolio_config.RANGE_RATIO_BY_SRC —— DOWN→RANGE 的底仓打 0。
+    # 2026-11-20 起 RANGE_RATIO_BY_SRC 的 UP 与 DOWN 都是 1.0（震荡一律允许持有底仓），
+    # 所以 range_ratio 恒为 1.0；字段保留是为了「改回 0 时无需改代码」，
+    # 以及面板/台账里能看出这段震荡是从上涨还是下跌转过来的。
     # 与回测 bt_skeleton.range_ratio_series() 完全同源（都取 rg4[k_seg-1]），
     # 且只依赖历史 bar，无前视。
     prev_st = rg4[k_seg - 1] if k_seg > 0 else None
@@ -386,15 +388,15 @@ def main():
         # 闸门把底仓砍到 25% 时，按全额去清就是 4 倍超卖。
         bg = o.get("base_gate", 1.0)
         amt = o.get("base_held") or 0
+        rr = o.get("range_ratio", 1.0)
         if st == "DOWN":
             act = "清底仓"
             tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")
                     else "；做空要等 4H 收盘跌破前 20 根低点")
             note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
         elif st in ("UP", "RANGE") and not o.get("triggered"):
-            rr = o.get("range_ratio", 1.0)
             if rr <= 0:
-                # DOWN→RANGE：暴跌后的筑底期零期望，按规则不留底仓。
+                # DOWN→RANGE 且系数为 0：按规则不留底仓。
                 # 这与「日线翻 DOWN」是两回事：状态没变差，只是来路决定这一段不值得押。
                 act = "清底仓"
                 note = (f"日线 {rs} 起为 RANGE（来路 {o.get('range_src')}），"
@@ -409,7 +411,9 @@ def main():
                         f"{gtail}{rtail}（4H 突破后再加到峰值）")
         else:
             continue                      # 已触发 = action 已是「开仓」，不重复
-        key = act + ":" + rs
+        # 去重键必须带 rr：系数从 1.0 调到 0.5 时底仓金额跟着变，
+        # 若只用 act:rs，会被误判成「这轮已提示过」而对已有持仓不提示减仓。
+        key = f"{act}:{rs}:{rr:.2f}"
         if bc.get(o["c"]) == key:
             continue                      # 这一轮已经提示过
         o["action"] = act
