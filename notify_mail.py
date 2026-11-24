@@ -126,11 +126,18 @@ def _subj_remind(exp, bj_hm):
 def _subj_patrol(sig, holds, bj_hm, op_n):
     near = min((o for o in sig["coins"] if not o["pos"] and o.get("need") is not None),
                key=lambda o: abs(o["need"]), default=None)
-    # 「持仓」只数 4H 永续仓，纯现货账户永远是 0/12 —— 看着像空仓，
+    # 「持仓」只数 4H 永续仓，现货账户里永远是 0/12 —— 看着像空仓，
     # 实际有 7 个币的现货底仓。两个数都写出来，否则每封信都在自相矛盾。
+    # 「纸面」= 策略算到但本账户不执行的空头动作数，不写就不知道策略在做什么。
     spot = sig.get("spot_held") or {}
-    s = (f'【巡检】{sig.get("mode", "")} · 4H 仓 {len(holds)}/{len(sig["coins"])}'
-         f' · 现货 {len(spot)} · 待办 {op_n}')
+    md = ("含做空·执行" if (sig.get("allow_short") and sig.get("execute_short"))
+          else ("含做空·纸面" if sig.get("allow_short") is not False else "不做空"))
+    s = (f'【巡检】{md} · 4H 仓 {len(holds)}/{len(sig["coins"])}'
+         f' · 现货 {len(spot)}')
+    paper = sig.get("paper") or []
+    if paper:
+        s += f' · 纸面 {len(paper)}'
+    s += f' · 待办 {op_n}'
     if near:
         s += f' · 距{near["c"]}触发{abs(near["need"]):.1f}%'
     return s + f' | {bj_hm}'

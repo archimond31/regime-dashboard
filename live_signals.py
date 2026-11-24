@@ -312,6 +312,11 @@ def analyze(c, now, prev_gate=None):
     o["target"] = round(tgt)
     o["side"] = "多" if tgt > 0 else ("空" if tgt < 0 else "—")
     o["target_note"] = why
+    # 这个动作实盘要不要真的下单。空头照算（策略书要它判翻转、算净敞口），
+    # 但现货账户不执行 —— 标出来，ticket.sync 据此决定开不开单。
+    o["exec"] = PC.executable(o["action"],
+                              1 if tgt > 0 else (-1 if tgt < 0 else 0),
+                              (o.get("pos") or {}).get("side", 0))
     o["cap_flag"] = PC.cap_check(tgt, c)[1]
     o["slices"] = PC.orders_needed(tgt, c)
 
@@ -461,17 +466,18 @@ def main():
         amt = o.get("base_held") or 0
         rr = o.get("range_ratio", 1.0)
         # 「该清多少」= min(策略认为该在的量, 手上真实有的量)。
-        # 后者更重要：2026-11-24 之前 4H 层还在算做空，BTC/ETH/BNB/DOGE/NEAR
-        # 这 5 个 DOWN 币手上是**零现货**，按 base_held 去提示清仓 = 让人卖他没买的东西。
+        # 后者更重要：有底仓而策略要清，才发卖单；没货还发卖单就是让人卖他没买的东西
+        # （BTC/ETH/BNB/DOGE/NEAR 这 5 个 DOWN 币手上是零现货，就是这种情形）。
         real = held.get(o["c"], 0.0)
         if st == "DOWN":
             if real <= 0:
-                # 无货可清；纯现货模式下也不做空 → 这一段什么都不用做。
-                # 不生成动作 = 不发工单，比发一张「卖出 0 U」干净。
+                # 无货可清。空头信号本身照常算（策略要它判翻转、算净敞口），
+                # 但现货账户不执行 —— 由 PC.EXECUTE_SHORT 在 ticket 那层挡掉。
                 continue
             act = "清底仓"
             amt = min(amt, round(real))
-            tail = ("" if PC.ALLOW_SHORT else "；现货模式不做空，卖出后空仓等日线翻回 UP")
+            tail = ("" if PC.EXECUTE_SHORT
+                    else "；空头信号只记在策略书里，本账户不下单")
             note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
         elif st in ("UP", "RANGE") and not o.get("triggered"):
             if rr <= 0:
@@ -514,6 +520,10 @@ def main():
         o["action"] = act
         o["clear_amount"] = amt
         o["note"] = note
+        # 建/清底仓都是现货，与 PC.EXECUTE_SHORT 无关，实盘一律执行。
+        # 必须在这里重算：analyze() 里 action 还是「空仓 / 闸门拦截」，
+        # 到这里才被改写成底仓动作，不重算就保留了旧值（虽然旧值恰好也是 True）。
+        o["exec"] = True
         bc[o["c"]] = key
     _save_bc(bc)
 
@@ -522,15 +532,23 @@ def main():
         astr = f"空 {abs(amt):,.0f}" if amt < 0 else f"{amt:,.0f}"
         print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}{astr:>10} U  {r['note']}")
 
-    urgent = [o for o in rows
-              if o["action"] in ("开仓", "平仓", "清底仓", "建底仓",
-                                 "止损临近", "即将到期")]
+    _ACT = ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")
+    # 分成两组，不能混：urgent 会变成工单，paper 只进策略书。
+    # 「需要动作 N 个」如果连纸面空头也数进去，等于每封信都在叫醒你去做不会做的事。
+    urgent = [o for o in rows if o["action"] in _ACT and o.get("exec", True)]
+    paper = [o for o in rows if o["action"] in _ACT and not o.get("exec", True)]
     # 以「所有品种里最新的那根已收盘 4H」为准，各币数据源不同、可能差一根
     bar = max((o["bar"] for o in rows), default=None)
+    if PC.ALLOW_SHORT and PC.EXECUTE_SHORT:
+        _mode = "合约（含做空·执行）"
+    elif PC.ALLOW_SHORT:
+        _mode = "策略含做空 · 执行纯现货"
+    else:
+        _mode = "纯现货（策略不做空）"
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
            "bar4h": bar, "capital": PC.CAPITAL, "allow_short": PC.ALLOW_SHORT,
-           "mode": "合约（含做空）" if PC.ALLOW_SHORT else "纯现货（不做空）",
+           "execute_short": PC.EXECUTE_SHORT, "mode": _mode,
            # 手上真实持有的现货底仓（从工单台账推），给 hold 页与邮件做「有货才提示卖」
            "spot_held": {k: round(v) for k, v in held.items()},
            # 生效配置留痕：三个月后回看「当时到底开没开」不用翻代码
@@ -539,13 +557,16 @@ def main():
                   "rebal": VT.REBAL_DAYS},
            "basegate": {"on": BG.ENABLED, "ma": BG.GATE_MA, "cv": BG.GATE_CV,
                         "hyst": BG.GATE_HYST},
-           "coins": rows, "urgent": [o["c"] for o in urgent], "errors": errs}
+           "coins": rows, "urgent": [o["c"] for o in urgent],
+           "paper": [o["c"] for o in paper], "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)
 
     print(f"\n数据截止 4H：{pay['bar4h']}   生成于 {pay['asof']}"
           f"   资金基准：{PC.CAPITAL:,.0f} U   模式：{pay['mode']}")
     print(f"需要动作：{len(urgent)} 个" + (("  → " + " ".join(pay['urgent'])) if urgent else "（全部无需动作）"))
+    if paper:
+        print(f"纸面动作 {len(paper)} 个（策略算到但本账户不执行）：{' '.join(pay['paper'])}")
     if errs:
         print(f"取数失败 {len(errs)} 个：{[e['c'] for e in errs]}")
     return pay

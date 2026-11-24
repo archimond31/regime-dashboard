@@ -27,14 +27,27 @@ BG_MA = (d.get("basegate") or {}).get("ma", 50)
 # 模式从信号文件读，不 import portfolio_config —— 页面要和「生成这份信号时的
 # 配置」一致，而不是和「此刻的代码」一致（两者可能因为重新部署而不同步）。
 SHORT_ON = bool(d.get("allow_short", True))
+EXEC_SHORT = bool(d.get("execute_short", True))
 MODE_TXT = d.get("mode") or ("合约（含做空）" if SHORT_ON else "纯现货（不做空）")
-SHORT_RULE = ("日线 DOWN 且 4H 收盘 &lt; 前 20 根最低 → 做空。"
-              "日线 RANGE 不做空，只等向上突破。"
-              if SHORT_ON else
-              "日线 DOWN → <b>只清现货底仓，不做空</b>（本账户纯现货）。")
-# 多头峰值 1.5× 里 1.0 是现货、0.5 是永续加仓；纯现货模式下后者照样在，
-# 所以峰值仍是 1.5× —— 变的是「不能做空」，不是「不能加杠杆做多」。
-PEAK_TXT = "峰值 1.5×（空头 0.5×）" if SHORT_ON else "峰值 1.5×（无空头）"
+if SHORT_ON and EXEC_SHORT:
+    MODE_SHORT = "含做空·执行"
+elif SHORT_ON:
+    MODE_SHORT = "含做空·纸面"
+else:
+    MODE_SHORT = "不做空"
+# 「策略能不能做空」和「这个账户做不做空」是两件事，速查里必须写清是哪一层，
+# 否则看的人会把「策略没做空信号」和「我不执行空头」混成一个判断。
+if SHORT_ON and not EXEC_SHORT:
+    SHORT_RULE = ("日线 DOWN 且 4H 收盘 &lt; 前 20 根最低 → 做空"
+                  "<b>（只记策略书，本账户不下单）</b>。日线 RANGE 不做空，只等向上突破。")
+elif SHORT_ON:
+    SHORT_RULE = ("日线 DOWN 且 4H 收盘 &lt; 前 20 根最低 → 做空。"
+                  "日线 RANGE 不做空，只等向上突破。")
+else:
+    SHORT_RULE = "日线 DOWN → <b>只清现货底仓，策略本身不做空</b>。"
+# 多头峰值 1.5× 里 1.0 是现货、0.5 是永续加仓；后者与做空与否无关。
+PEAK_TXT = "峰值 1.5×（空头另计 0.5×）" if SHORT_ON else "峰值 1.5×（无空头）"
+_CAP = d.get("capital") or 0.0
 urgent = [o for o in COINS if o["action"] in ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")]
 holds = [o for o in COINS if o["pos"]]
 blocked = [o for o in COINS if o["gate_blocked"]]
@@ -112,10 +125,20 @@ if holds:
             f'<td style="padding:8px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:center">'
             # 状态格单独拼：不能在 f-string 的表达式里写转义引号，
             # Python 3.11 及更早会直接报 SyntaxError（PEP 701 到 3.12 才允许）
-            + (f'<b style="color:{DN}">已翻转</b>' if p["flipped"] else "持有")
+            + (f'<b style="color:{DN}">已翻转</b>' if p["flipped"] else
+               ('<span style="color:#6a1b9a">纸面</span>'
+                if not o.get("exec", True) else "持有"))
             + '</td></tr>')
+    _paper_n = sum(1 for o in holds if not o.get("exec", True))
+    if not _paper_n:
+        _ptxt = ""
+    elif _paper_n == len(holds):
+        _ptxt = " · 全部纸面，本账户不下单"
+    else:
+        _ptxt = f" · {_paper_n} 个纸面，本账户不下单"
+    _htitle = f'当前持仓（{len(holds)} 个{_ptxt}）'
     hold_block = (
-        f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓（{len(holds)} 个）</h2>'
+        f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">{_htitle}</h2>'
         f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
         f'<tr style="background:#f5f5f5">'
         + "".join(f'<th style="padding:7px 9px;text-align:right;font-size:12px;color:{MU};font-weight:500">{h}</th>'
@@ -123,7 +146,11 @@ if holds:
         + f'</tr>{hrows}</table>'
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
         f'「入场时间」为北京时间（UTC+8），即那根 4H 的收盘时刻——不是下单时刻。'
-        f'「剩余兜底」= 距满 {120} 根 4H 强制平仓还剩多少根。到 0 就按收盘价平。</div>')
+        f'「剩余兜底」= 距满 {120} 根 4H 强制平仓还剩多少根。到 0 就按收盘价平。</div>'
+        + (f'<div style="font-size:12px;color:#6a1b9a;margin-top:4px;line-height:1.8">'
+           f'<b>「纸面」= 策略算得出、但本账户不执行的仓位</b>（现货账户不做空）。'
+           f'它照常参与状态判断、净敞口与回测统计，唯一区别是不发工单、不占保证金。</div>'
+           if _paper_n else ''))
 else:
     hold_block = (f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓（4H 永续层）</h2>'
                   f'<div style="font-size:13px;color:{MU};padding:10px 0">4H 层全部空仓。</div>')
@@ -169,7 +196,13 @@ if _SPOT:
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
         f'「持有」由工单台账推（已结算的建底仓 − 清底仓，含未结算的建仓单）。'
         f'现货底仓没有价格止损，唯一退出通道是「日线翻 DOWN → 清底仓」。'
-        + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无底仓 —— 这是规则要求的状态（不做空就没有仓位）。'
+        + (f'<br><b>两个净敞口不要混用</b>：策略书 '
+           f'{sum(o.get("target") or 0 for o in COINS) / (_CAP or 1):+.2f}×'
+           f'（含纸面空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'
+           f'风控看后者，判断策略状态看前者。'
+           if not EXEC_SHORT else '')
+        + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无底仓 —— 规则要求的状态'
+           f'（{("空头信号只记策略书，本账户不下单" if SHORT_ON and not EXEC_SHORT else "不做空")}）。'
            if _flat else '')
         + '</div>')
 else:
@@ -181,11 +214,15 @@ for o in COINS:
     st = o["state"]
     g = o["gate"]
     if o["pos"]:
-        act, ac = "持有", MU
+        # 空头仓在现货账户里只记纸面，不发工单。不标出来，这个「持有」
+        # 看着就像账户里真有一笔钱在动。
+        act, ac = ("纸面持有" if not o.get("exec", True) else "持有"), MU
         trig, tcol = "—", MU
     else:
         act = o["action"]
         ac = {"开仓": UP, "闸门拦截": "#ef6c00", "空仓": MU}.get(act, MU)
+        if not o.get("exec", True):
+            act = f"{act}·纸面"
         # need 是「还要走多少百分比」，乘上方向才看得出是涨还是跌：
         # 做多 want=+1 → +5.77%（要涨）；做空 want=-1 → −2.42%（要跌）
         if o.get("need") is not None:
@@ -285,9 +322,10 @@ _open_n = sum(1 for i in TK.load()["items"] if i["status"] == "open")
 _cap = d.get("capital") or 0
 kpis = [("本金", f"{_cap:,.0f} U", TX),
         # 模式放在第二张：工单、峰值、净敞口全都是它的派生量。
-        # 纯现货 vs 含做空，会让同一批币的「该做多少」差一倍以上。
-        ("模式", "纯现货" if not SHORT_ON else "含做空", "#1565c0"),
-        ("持仓", f"{len(holds)} / {len(COINS)}", TX),
+        # 写「含做空·纸面」而不是「纯现货」——策略仍算空头，只是不发单，
+        # 这两件事对「该期待什么收益」的影响完全不同。
+        ("模式", MODE_SHORT, "#1565c0"),
+        ("4H 仓", f"{len(holds)} / {len(COINS)}", TX),
         ("待执行工单", f"{_open_n} 张", UP if _open_n else TX),
         ("闸门拦截", f"{len(blocked)}", "#ef6c00" if blocked else TX),
         ("最接近触发", f'{nearest["c"]} {abs(nearest["need"]):.2f}%' if nearest else "—", TX)]

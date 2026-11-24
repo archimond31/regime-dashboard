@@ -55,9 +55,11 @@ COLOR = {"开仓": "#c62828", "平仓": "#2e7d32", "止损临近": "#ef6c00",
          "即将到期": "#6a1b9a", "清底仓": "#d84315", "建底仓": "#1565c0"}
 BAR_FMT = "%Y-%m-%d %H:%M"
 ATR_K = 1.5      # 与 bt_skeleton.ATR_K 一致：止损 = 入场 ∓ 1.5×ATR(14)
-# 当前交易模式，印在邮件资金条上 —— 「这封邮件按含做空还是纯现货算的」
-# 是会变的，不写出来只能靠工单里有没有「做空」去猜。
-MODE = "合约（含做空）" if PC.ALLOW_SHORT else "纯现货（不做空）"
+# 当前模式，印在邮件资金条上 —— 「这封邮件按什么口径算的」是会变的，
+# 不写出来只能靠工单里有没有「做空」去猜。
+# 三种状态要分开：策略能做空 / 策略能做空但账户不执行 / 策略本身不做空。
+MODE = ("合约（含做空·执行）" if (PC.ALLOW_SHORT and PC.EXECUTE_SHORT) else
+        ("策略含做空 · 执行纯现货" if PC.ALLOW_SHORT else "纯现货（策略不做空）"))
 
 
 # ---------------- 台账 ----------------
@@ -206,6 +208,10 @@ def sync(sig=None):
     for o in sig["coins"]:
         if o.get("action") not in TTL:
             continue
+        # 策略算到 ≠ 账户要执行。空头在现货账户里只进策略书，不开工单 ——
+        # 判据用信号自带的 exec 字段（由 PC.executable 生成），不在这里另判一遍。
+        if not o.get("exec", True):
+            continue
         k = f'{o["c"]}|{o["action"]}|{o.get("regime_start") or bar}'
         live[k] = o
 
@@ -244,16 +250,14 @@ def sync(sig=None):
     for i in items:
         if i["status"] != "open":
             continue
-        # 纯现货模式下，做空性质的单直接作废。
+        # 现货账户里，做空性质的单直接作废（策略仍算空头，但这一单不下到账户）。
         # 不能只看 side：平多也是卖（side=-1），误杀会把「止损临近·多」清掉。
         # 所以判据用「开仓且 side<0」+ 新单里记下的 pos_side<0（平空/空头止损）。
-        # 老单没有 pos_side 字段，只能靠 kind == 开仓 抓 —— 够用：
-        # 空头持仓在切纯现货后不再产生，历史空单本来就是模拟的。
-        if not PC.ALLOW_SHORT and i["kind"] != "清底仓" and (
+        if not PC.EXECUTE_SHORT and i["kind"] != "清底仓" and (
                 (i["kind"] == "开仓" and i.get("side", 1) < 0)
                 or i.get("pos_side", 0) < 0):
             i["status"] = "void"
-            i["void_note"] = "已切纯现货模式（ALLOW_SHORT=False），做空类单作废"
+            i["void_note"] = "现货账户不执行空头（EXECUTE_SHORT=False），只存策略书"
             i["settled_at"] = bar
             voided += 1
             continue
@@ -348,9 +352,10 @@ def _cur_sig():
         with open(SIG, encoding="utf-8") as f:
             d = json.load(f)
         return ({o["c"]: o for o in d.get("coins", [])},
-                d.get("capital") or PC.CAPITAL)
+                d.get("capital") or PC.CAPITAL,
+                d.get("spot_held") or {})
     except Exception:
-        return {}, PC.CAPITAL
+        return {}, PC.CAPITAL, {}
 
 
 def render():
@@ -361,7 +366,7 @@ def render():
         return ('<div style="border:1px solid #c8e6c9;background:#f1f8f4;border-radius:8px;'
                 'padding:12px 14px;margin:18px 0;font-size:13px;color:#1b5e20">'
                 '<b>没有待执行工单。</b>上一批动作都已结算。</div>')
-    CUR, SIG_CAP = _cur_sig()
+    CUR, SIG_CAP, SPOT = _cur_sig()
 
     # 平仓/清底仓的金额该是多少 —— 口径和建仓类**不一样**，不能拿 target 比。
     # 两类都按「现在的本金」重算：改本金后这里是唯一能发现「多平 2.5 倍」的地方。
@@ -468,15 +473,23 @@ def render():
     ex_n = sum(1 for i in op if expired(i))
     # 本金条：这行以前没有，导致「邮件里到底按多少钱算的」只能从金额反推。
     # 改成 2000 之后必须显式印出来 —— 否则 5000 口径的旧工单混在里面看不出来。
+    #
+    # 敞口也印两个口径：**策略书的净敞口 ≠ 实盘账户的净敞口**。
+    # 策略含做空时，账本净 +424 U(0.21×)，而现货账户实际 +1,004 U(0.50×)，差 2.4 倍。
+    # 只印一个，看的人会拿错的那个去做风控判断。
     gross = sum(abs(o.get("target") or 0) for o in CUR.values())
     lev = (gross / PC.CAPITAL) if PC.CAPITAL else 0.0
+    net_s = sum(o.get("target") or 0 for o in CUR.values()) / PC.CAPITAL if PC.CAPITAL else 0.0
+    net_r = (sum(SPOT.values()) / PC.CAPITAL) if PC.CAPITAL else 0.0
     stale_cap = (SIG_CAP and abs(SIG_CAP - PC.CAPITAL) > 1.0)
     bar = (f'<div style="padding:7px 12px;background:#fffaf5;border-bottom:1px solid #f0d9d9;'
            f'font-size:12px;color:#5d4037">'
            f'本金 <b style="font-size:13px">{PC.CAPITAL:,.0f} U</b>'
-           f'　模式 <b>{html.escape(MODE)}</b>'
-           f'　在场毛敞口 <b>{gross:,.0f} U</b>（{lev:.2f}×）'
-           f'　待买 <b>{buy_sum:,.0f} U</b> / 待卖 <b>{sell_sum:,.0f} U</b>'
+           f'　模式 <b>{html.escape(MODE)}</b><br>'
+           f'策略书 净敞口 <b>{net_s:+.2f}×</b>（毛 {gross:,.0f} U / {lev:.2f}×）'
+           + (f'　｜　实盘 现货 <b>{sum(SPOT.values()):,.0f} U</b>'
+              f'（净 {net_r:+.2f}×）' if SPOT else '')
+           + f'<br>待买 <b>{buy_sum:,.0f} U</b> / 待卖 <b>{sell_sum:,.0f} U</b>'
            + (f'　<span style="color:#ef6c00">⚠ {stale_n} 张单的原金额已过时，表中已按现口径换算</span>'
               if stale_n else '')
            + (f'　<span style="color:#7b1fa2">⚠ 信号文件本金 {SIG_CAP:,.0f} U 与本配置不一致</span>'
