@@ -148,7 +148,18 @@ def analyze_one(h):
 def main():
     with open(CFG, encoding="utf-8") as f:
         cfg = json.load(f)
-    rows = [analyze_one(h) for h in cfg["holdings"]]
+    hold = cfg.get("holdings") or []
+    if not hold:
+        # 空清单不是错误，是「没有需要单独跟踪的场外持仓」。
+        # 2026-11-24 清掉的那批是另一个账户的 12 万 U 老仓位；当前策略的现货底仓
+        # 由 _tickets.json 台账推（live_signals.spot_held），不归这里管。
+        #
+        # 为什么不发一封「你没有持仓」的信：每天一封空报告会训练人忽略这个提醒，
+        # 等到真有时候也不看了 —— 和「静默失败」是同一个病，只是方向相反。
+        print("holdings.json 的 holdings 为空 —— 没有需要单独跟踪的场外持仓，跳过。")
+        print("  当前策略的现货底仓请看 signal_now.html 的「现货底仓」表。")
+        return
+    rows = [analyze_one(h) for h in hold]
 
     ok = [r for r in rows if "error" not in r]
     MV = sum(r["mv"] for r in ok)
