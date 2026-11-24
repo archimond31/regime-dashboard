@@ -126,8 +126,11 @@ def _subj_remind(exp, bj_hm):
 def _subj_patrol(sig, holds, bj_hm, op_n):
     near = min((o for o in sig["coins"] if not o["pos"] and o.get("need") is not None),
                key=lambda o: abs(o["need"]), default=None)
-    s = (f"【巡检】无新动作 · 持仓 {len(holds)}/{len(sig['coins'])}"
-         f' · 待办 {op_n}')
+    # 「持仓」只数 4H 永续仓，纯现货账户永远是 0/12 —— 看着像空仓，
+    # 实际有 7 个币的现货底仓。两个数都写出来，否则每封信都在自相矛盾。
+    spot = sig.get("spot_held") or {}
+    s = (f'【巡检】{sig.get("mode", "")} · 4H 仓 {len(holds)}/{len(sig["coins"])}'
+         f' · 现货 {len(spot)} · 待办 {op_n}')
     if near:
         s += f' · 距{near["c"]}触发{abs(near["need"]):.1f}%'
     return s + f' | {bj_hm}'

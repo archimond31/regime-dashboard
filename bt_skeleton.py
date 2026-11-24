@@ -98,17 +98,28 @@ _BLOOD_CACHE = {}
 def range_ratio_series(rg4):
     """逐 bar 的「RANGE 底仓系数」。**与闸门正交**，两者相乘。
 
-    【当前配置（2026-11-20 盘后起）】UP→RANGE 取 1.0，DOWN→RANGE 取 0.5。
+    【当前配置（2026-11-20 折中档）】UP→RANGE 取 1.0，DOWN→RANGE 取 0.5。
     这个函数本身不写死任何数字，全部查 portfolio_config.RANGE_RATIO_BY_SRC，
     所以改配置就能切换行为，不需要动 base_series / build / live_signals。
 
-    【一天内改过三次，别只记住其中一版】
-      2026-11-19  UP=1.0 / DOWN=0.0   口径A 261 万，回撤 −48.2%，Calmar(C) 1.40
-      2026-11-20  UP=1.0 / DOWN=1.0   口径A 318 万，回撤 −61.2%，Calmar(C) 1.18
+    【一天内改过四轮，别只记住其中一版】
+      2026-11-19  UP=1.0 / DOWN=0.0   口径A 263 万，回撤 −48.2%，Calmar(C) 1.40
+      2026-11-20  UP=1.0 / DOWN=1.0   口径A 319 万，回撤 −61.2%，Calmar(C) 1.18
       2026-11-20  UP=1.0 / DOWN=0.5   口径A 291 万，回撤 −54.9%，Calmar(C) 1.29  ← 当前
+      2026-11-20  UP=1.0 / DOWN=0.0   试改后**验证不通过，已回滚**（见下）
     每 0.5 档 ≈ +28 万 / −6.8pp，严格线性 —— 这是**加 beta 不是加 alpha**。
     最干净的证据：RANGE 段自身贡献 0→0.5→1.0 对应 −11.0% / −19.7% / −30.3%，
     与系数严格成比例，而同期 UP 段恒 −30.9%。三臂全表见 _exp_range_all.py。
+
+    【为什么 0.0 看着好、实际不成立（_verify_dn0.py 的 walk-forward 结论）】
+      只看两个窗口的整体指标，0.0 像白送的降险：全期 Calmar 2.20→2.73、
+      22 起 1.75→2.14 且收益不动。但拆开就不成立：
+        · 2024 起（不含 2022 的独立样本）：Calmar 4.21→3.73、年化 −6.2pp；
+        · 分币 12 个只有 6 个改善；
+        · 滚动 250 日（22 起）回撤更浅仅 78/154 = 51%，收益更高 39%；
+        · 逐年：改善全在 2022（−41.9%→−34.3%），2023 −4.4pp、2024 −1.7pp 全变差。
+      → **单事件驱动**，与 cross_fix_init（BNB 2018 一个窗口占 92%）同构，不达标。
+      → 这属于风险偏好选择，不是策略改进。别再拿「全期 Calmar」当依据。
 
     **无前视**：来路取 rg4[k-1]，是 bar k 开始前就已知的历史事实，
     所以 out[k] 直接作用于 bar k 的收益是对的，不需要左移一格。
@@ -226,10 +237,14 @@ def atr_percentile(b4, atr, window=500, coin=None):
     return pct
 
 
-def signals(b4, rg4, atr, vol_q=VOL_Q, coin=None, blood4=None):
+def signals(b4, rg4, atr, vol_q=VOL_Q, coin=None, blood4=None, allow_short=True):
     """逐 4H bar 跑 L1+L2+L3，返回 trades 与逐 bar 信号方向。
 
     blood4=None 时按 BLOCK_INIT 自动推算血统；传空列表 [] 可显式关闭屏蔽。
+    allow_short=False：不做空（纯现货模式）。此时 DOWN 段不产生任何 trade，
+                       sig 恒 >= 0，持仓判定里也就不会冒出「空头持有中」。
+                       默认 True 是为了不动历史实验脚本的数字 —— 20 多个
+                       _exp_* / _verify_* 都按含做空的基线写过结论。
     """
     n = len(b4)
     sig = [0] * n            # 每根 bar 的目标信号方向（+1 多 / -1 空 / 0 无）
@@ -241,6 +256,9 @@ def signals(b4, rg4, atr, vol_q=VOL_Q, coin=None, blood4=None):
     while i < n - 1:
         rg = rg4[i]
         if rg not in ("UP", "DOWN") or atr[i] is None:
+            i += 1
+            continue
+        if not allow_short and rg == "DOWN":
             i += 1
             continue
         # init 血统 = 状态机刚预热完的初始猜测，没有均线/背离纠错通道，

@@ -12,6 +12,8 @@ import os
 import datetime as _dt
 
 import ticket as TK      # 工单台账：把「本轮动作」升级成「跨轮可结算的待办」
+# 这个文件底部有个变量叫作 html（整页 HTML），所以模块不能 `import html` —— 会被遮住。
+from html import escape as _esc
 
 SRC = "_signal.json"
 OUT = "signal_now.html"
@@ -22,6 +24,17 @@ COINS = d["coins"]
 # 关着的时候不该在表里摆一列「100%」—— 那会让人以为它在工作。
 BG_ON = bool((d.get("basegate") or {}).get("on"))
 BG_MA = (d.get("basegate") or {}).get("ma", 50)
+# 模式从信号文件读，不 import portfolio_config —— 页面要和「生成这份信号时的
+# 配置」一致，而不是和「此刻的代码」一致（两者可能因为重新部署而不同步）。
+SHORT_ON = bool(d.get("allow_short", True))
+MODE_TXT = d.get("mode") or ("合约（含做空）" if SHORT_ON else "纯现货（不做空）")
+SHORT_RULE = ("日线 DOWN 且 4H 收盘 &lt; 前 20 根最低 → 做空。"
+              "日线 RANGE 不做空，只等向上突破。"
+              if SHORT_ON else
+              "日线 DOWN → <b>只清现货底仓，不做空</b>（本账户纯现货）。")
+# 多头峰值 1.5× 里 1.0 是现货、0.5 是永续加仓；纯现货模式下后者照样在，
+# 所以峰值仍是 1.5× —— 变的是「不能做空」，不是「不能加杠杆做多」。
+PEAK_TXT = "峰值 1.5×（空头 0.5×）" if SHORT_ON else "峰值 1.5×（无空头）"
 urgent = [o for o in COINS if o["action"] in ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")]
 holds = [o for o in COINS if o["pos"]]
 blocked = [o for o in COINS if o["gate_blocked"]]
@@ -112,8 +125,55 @@ if holds:
         f'「入场时间」为北京时间（UTC+8），即那根 4H 的收盘时刻——不是下单时刻。'
         f'「剩余兜底」= 距满 {120} 根 4H 强制平仓还剩多少根。到 0 就按收盘价平。</div>')
 else:
-    hold_block = (f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓</h2>'
-                  f'<div style="font-size:13px;color:{MU};padding:10px 0">全部空仓。</div>')
+    hold_block = (f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓（4H 永续层）</h2>'
+                  f'<div style="font-size:13px;color:{MU};padding:10px 0">4H 层全部空仓。</div>')
+
+# ---------- 现货底仓块 ----------
+# 上半部分（当前持仓）只讲 4H 永续仓。纯现货账户里那一栏永远是空的，
+# 而真实的钱全在现货底仓上 —— 不把它单独列出来，"持仓 0/12" 就是在说谎。
+_SPOT = d.get("spot_held") or {}
+if _SPOT:
+    _srows = ""
+    _ssum = 0.0
+    for o in COINS:
+        v = _SPOT.get(o["c"])
+        if not v:
+            continue
+        _ssum += v
+        tgt = o.get("target") or 0
+        diff = tgt - v
+        dcol = (MU if abs(diff) < max(20, 0.1 * v) else (UP if diff > 0 else DN))
+        dtxt = ("—" if abs(diff) < max(20, 0.1 * v)
+                else (f"{diff:+,.0f} 待{'买' if diff > 0 else '卖'}"))
+        _srows += (
+            f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD}"><b>{o["c"]}</b></td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};color:'
+            f'{state_color(o["state"])}">{o["state"]}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right">{v:,.0f} U</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right">{tgt:,.0f} U</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right;color:{dcol}">{dtxt}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:12px;color:{MU}">'
+            f'{_esc(o.get("target_note") or "")}</td></tr>')
+    # 日线 DOWN 而没有底仓的币：这是**符合规则**的状态，不是遗漏。
+    # 不写这句，看到「12 个币只有 7 个有货」会以为漏买了。
+    _flat = [o["c"] for o in COINS if not _SPOT.get(o["c"]) and o["state"] == "DOWN"]
+    spot_block = (
+        f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">'
+        f'现货底仓（{len(_SPOT)} 个 · {_ssum:,.0f} U）</h2>'
+        f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+        f'<tr style="background:#f5f5f5">'
+        + "".join(f'<th style="padding:7px 9px;text-align:{al};font-size:12px;color:{MU};font-weight:500">{h}</th>'
+                  for h, al in [("品种", "left"), ("日线", "left"), ("持有", "right"),
+                                ("该持有", "right"), ("差额", "right"), ("说明", "left")])
+        + f'</tr>{_srows}</table>'
+        f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
+        f'「持有」由工单台账推（已结算的建底仓 − 清底仓，含未结算的建仓单）。'
+        f'现货底仓没有价格止损，唯一退出通道是「日线翻 DOWN → 清底仓」。'
+        + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无底仓 —— 这是规则要求的状态（不做空就没有仓位）。'
+           if _flat else '')
+        + '</div>')
+else:
+    spot_block = ""
 
 # ---------- 全表 ----------
 rows = ""
@@ -202,7 +262,8 @@ all_block = (
     f'<b>「仓位系数」</b>：波动目标化（按 1/σ 分配风险）。'
     f'<span style="color:#c62828">红 = 加仓</span>（该币波动低，同样的钱承担的风险更小）、'
     f'<span style="color:#2e7d32">绿 = 减仓</span>（波动高）。'
-    f'系数已含 κ，平均总敞口与不加时相同；只改金额、不改方向，空头同样被缩。<br>'
+    f'系数已含 κ，平均总敞口与不加时相同；只改金额、不改方向'
+    f'{"，空头同样被缩" if SHORT_ON else ""}。<br>'
     + ((f'<b>「底仓」</b>：底仓闸门。价格在 MA{BG_MA} 上方 = 100%，跌破 = 25%，'
         f'中间滞回带防抖动。只作用于底仓，加仓层由 4H 突破决定、不受影响。'
         f'DOWN 时底仓本来就是 0，显示「—」。<br>')
@@ -219,12 +280,20 @@ nearest = min((o for o in COINS if not o["pos"] and o.get("need") is not None),
 # KPI 里的「待执行」用跨轮工单数，不用本轮的 urgent ——
 # 本轮的 urgent 每 4 小时清零，读它会让人以为「没有欠账」。
 _open_n = sum(1 for i in TK.load()["items"] if i["status"] == "open")
-kpis = [("持仓", f"{len(holds)} / {len(COINS)}", TX),
+# 本金放在第一张卡：工单金额都是它的派生量，不摆在最前面，
+# 「这页按多少钱算的」就只能靠金额反推（5000→2000 时就吃过这个亏）。
+_cap = d.get("capital") or 0
+kpis = [("本金", f"{_cap:,.0f} U", TX),
+        # 模式放在第二张：工单、峰值、净敞口全都是它的派生量。
+        # 纯现货 vs 含做空，会让同一批币的「该做多少」差一倍以上。
+        ("模式", "纯现货" if not SHORT_ON else "含做空", "#1565c0"),
+        ("持仓", f"{len(holds)} / {len(COINS)}", TX),
         ("待执行工单", f"{_open_n} 张", UP if _open_n else TX),
         ("闸门拦截", f"{len(blocked)}", "#ef6c00" if blocked else TX),
         ("最接近触发", f'{nearest["c"]} {abs(nearest["need"]):.2f}%' if nearest else "—", TX)]
+_kw = 100 // len(kpis)
 kpi_html = "".join(
-    f'<td style="padding:10px 12px;border:1px solid {BD};border-radius:6px;width:25%">'
+    f'<td style="padding:10px 12px;border:1px solid {BD};border-radius:6px;width:{_kw}%">'
     f'<div style="font-size:19px;font-weight:600;color:{c}">{v}</div>'
     f'<div style="font-size:11px;color:{MU};margin-top:2px">{k}</div></td>' for k, v, c in kpis)
 
@@ -281,15 +350,15 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 {action_block}
 {ticket_block}
 {hold_block}
+{spot_block}
 {all_block}
 
 <h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">规则速查</h2>
 <div style="font-size:12.5px;color:#444;line-height:1.9;background:#fafafa;border:1px solid {BD};
 border-radius:8px;padding:12px 14px">
-<b>开仓</b>：日线 UP 且 4H 收盘 &gt; 前 20 根最高 → 做多；日线 DOWN 且 4H 收盘 &lt; 前 20 根最低 → 做空。
-日线 RANGE 不做空，只等向上突破。<b>波动分位 &gt; 85% 时一律不开新仓。</b><br>
+<b>开仓</b>：日线 UP 且 4H 收盘 &gt; 前 20 根最高 → 做多。{SHORT_RULE}<b>波动分位 &gt; 85% 时一律不开新仓。</b><br>
 <b>平仓</b>：① 日线状态翻转　② 价格触及 1.5×ATR(14) 止损　③ 持有满 120 根 4H 强制平仓。<br>
-<b>仓位</b>：底仓 1.0 走现货，突破加仓 +0.5 走永续，总名义 1.5×。本页只给方向，不含下单。<br>
+<b>仓位</b>：底仓 1.0 走现货，突破加仓 +0.5 走永续，总名义 {PEAK_TXT}。本页只给方向，不含下单。<br>
 <b>RANGE 来路</b>：RANGE 段的底仓按「进入前那段是什么」打折 —— 上行转来保持 100%（段内平均 +8.78%），
 下行转来归零（段内平均 +0.50%，零期望的纯波动）。状态格会标「来路 UP/DOWN」。<br>
 <b>HYPE 特别说明</b>：2024-12 才上线、只有约两年数据且全在牛市里，日线状态机没经过熊市检验，

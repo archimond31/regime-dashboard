@@ -126,7 +126,10 @@ def analyze(c, now, prev_gate=None):
     pct = BT.atr_percentile(b4, atr, coin=c)
     # 显式传 blood4：生产走 d1 → 血统的精确路径，与 rg4 完全同源。
     # BT.BLOCK_INIT 打开时，init 血统（状态机刚预热完的初始猜测）不开新仓。
-    sig, trades = BT.signals(b4, rg4, atr, vol_q=VOL_Q, coin=c, blood4=blood4)
+    # allow_short 必须显式传：BT 里默认 True（保历史实验口径），
+    # 生产不传就会继续在 DOWN 段生成「空头持有中」，与纯现货账户对不上。
+    sig, trades = BT.signals(b4, rg4, atr, vol_q=VOL_Q, coin=c, blood4=blood4,
+                             allow_short=PC.ALLOW_SHORT)
 
     last = b4[-1]
     px = last["close"]
@@ -196,8 +199,12 @@ def analyze(c, now, prev_gate=None):
         o["pos"] = None
 
     # ---- 若空仓，当前是否满足入场 ----
+    # 空仓时「当前是否满足入场」：
+    #   纯现货模式下 DOWN 段的 want 是 0（不是 -1）—— 显示成「需跌 X% 才触发」
+    #   等于在提示一个不会执行的做空动作，那正是这次改动要消灭的东西。
     if holding is None:
-        want = 1 if state == "UP" else (-1 if state == "DOWN" else 0)
+        want = 1 if state == "UP" else (
+            -1 if (state == "DOWN" and PC.ALLOW_SHORT) else 0)
         trig = False
         if want == 1:
             trig = px > hi
@@ -231,6 +238,11 @@ def analyze(c, now, prev_gate=None):
         if o["state"] == "RANGE":
             o["action"] = "空仓"
             o["note"] = "日线 RANGE，只能做多但需突破；当前无方向"
+        elif o["state"] == "DOWN" and not PC.ALLOW_SHORT:
+            # 纯现货：DOWN 段唯一该做的动作是「清掉已有底仓」，没有底仓就什么都不做。
+            # 不写成「等跌 X% 触发」—— 那是做空语言，账户里没有对应仓位。
+            o["action"] = "空仓"
+            o["note"] = "日线 DOWN｜现货模式不做空，无 4H 仓位可动"
         elif o["gate_blocked"]:
             o["action"] = "闸门拦截"
             o["note"] = f"波动分位 {pctv*100:.0f}% > {VOL_Q*100:.0f}%，不开新仓"
@@ -302,6 +314,18 @@ def analyze(c, now, prev_gate=None):
     o["target_note"] = why
     o["cap_flag"] = PC.cap_check(tgt, c)[1]
     o["slices"] = PC.orders_needed(tgt, c)
+
+    # ---- 最小下单额检查 ----
+    # 小本金（2000U）下这不是理论问题：BTC 的最小可下单是 61.3U，
+    # 而「RANGE 来路 DOWN 的底仓」和「空头」= 本金×9.2%×0.5×scale，
+    # 2000U 时只有 92×scale，scale < 0.67 就挂不出去。
+    # 不去静默跳过（那等于暗中减币），而是把「会被拒单」写在工单 note 上让人看见。
+    _mo = PC.min_order_value(c)
+    o["min_order"] = _mo
+    o["below_min"] = bool(0 < abs(o["target"]) < _mo)
+    if o["below_min"] and o["action"] in ("开仓", "建底仓"):
+        o["note"] = (f"{o['note']}｜⚠ 金额 {abs(o['target'])}U < 该合约最小 "
+                     f"{_mo:.0f}U，直接挂会被拒单")
     return o
 
 
@@ -355,6 +379,53 @@ def _save_gate(d):
         pass
 
 
+TICKETS = "_tickets.json"
+
+
+def spot_held(cur_tgt=None):
+    """各币「手上真实持有的现货底仓」金额（U）—— 从工单台账推，不另建一份持仓账。
+
+    为什么不新建一份：多一份账就多一个会失同步的地方。台账已经记了每张
+    建底仓/清底仓单及其结算状态，这就是现货仓位的完整历史。
+
+    口径：
+      · 已结算(done)的建底仓 − 已结算(done)的清底仓；
+      · 该币只有未结算的建底仓 → 按该单金额算持有（人已经买了，只是没回来标记）；
+      · 从没建过 → 0（不出现在返回里）。
+
+    cur_tgt：{币: 当前信号 target}。台账里的 notional 是**建单时**的快照，
+    5000 本金时代建的单（HYPE 477）与现在该买的（200）差 2.4 倍；
+    拿旧快照当「持有量」会高估。有现口径就取 min(快照, 现口径)。
+
+    只有一个用途：**决定要不要提示「清底仓」，以及该清多少**。
+    没有它，纯现货模式下 BTC/ETH/BNB/DOGE/NEAR 这 5 个日线 DOWN 的币
+    每轮都会生成「卖出 358 / 261 / 301 / 239 / 108 U」——
+    而账户里根本没有这些货。这类「卖出不存在的东西」的指令比漏提示更伤人。
+    """
+    cur_tgt = cur_tgt or {}
+    held = {}
+    try:
+        with open(TICKETS, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return held
+    for i in d.get("items", []):
+        k = i.get("coin")
+        if not k or i.get("kind") not in ("建底仓", "清底仓"):
+            continue
+        amt = abs(i.get("notional") or 0)
+        if i.get("kind") == "建底仓":
+            t = cur_tgt.get(k)
+            if t is not None and t > 0:
+                amt = min(amt, t)        # 旧快照高估时按现口径收窄
+        sgn = 1 if i.get("kind") == "建底仓" else -1
+        if i.get("status") == "done":
+            held[k] = held.get(k, 0.0) + sgn * amt
+        elif i.get("status") == "open" and sgn > 0:
+            held[k] = max(held.get(k, 0.0), amt)
+    return {k: v for k, v in held.items() if v > 0}
+
+
 def main():
     now = _now_utc()
     gs = _load_gate()
@@ -375,6 +446,7 @@ def main():
     # 上涨初期同理「该建底仓却一直空着」。这里补成显式指令。
     # 去重：按「动作 + 该轮状态的起始日」记台账，同一轮只提示一次。
     bc = _load_bc()
+    held = spot_held({o["c"]: o.get("target") for o in rows})
     for o in rows:
         if o["pos"] is not None:
             continue                      # 已有 4H 持仓，底仓动作不单独提示
@@ -388,16 +460,27 @@ def main():
         bg = o.get("base_gate", 1.0)
         amt = o.get("base_held") or 0
         rr = o.get("range_ratio", 1.0)
+        # 「该清多少」= min(策略认为该在的量, 手上真实有的量)。
+        # 后者更重要：2026-11-24 之前 4H 层还在算做空，BTC/ETH/BNB/DOGE/NEAR
+        # 这 5 个 DOWN 币手上是**零现货**，按 base_held 去提示清仓 = 让人卖他没买的东西。
+        real = held.get(o["c"], 0.0)
         if st == "DOWN":
+            if real <= 0:
+                # 无货可清；纯现货模式下也不做空 → 这一段什么都不用做。
+                # 不生成动作 = 不发工单，比发一张「卖出 0 U」干净。
+                continue
             act = "清底仓"
-            tail = ("；做空仍被波动闸门拦着" if o.get("gate_blocked")
-                    else "；做空要等 4H 收盘跌破前 20 根低点")
+            amt = min(amt, round(real))
+            tail = ("" if PC.ALLOW_SHORT else "；现货模式不做空，卖出后空仓等日线翻回 UP")
             note = f"日线 {rs} 起转 DOWN，撤掉现货底仓 {amt} U{tail}"
         elif st in ("UP", "RANGE") and not o.get("triggered"):
             if rr <= 0:
                 # DOWN→RANGE 且系数为 0：按规则不留底仓。
                 # 这与「日线翻 DOWN」是两回事：状态没变差，只是来路决定这一段不值得押。
+                if real <= 0:
+                    continue
                 act = "清底仓"
+                amt = min(amt, round(real))
                 note = (f"日线 {rs} 起为 RANGE（来路 {o.get('range_src')}），"
                         f"按规则底仓归零，撤掉现货 {amt} U")
             else:
@@ -406,8 +489,21 @@ def main():
                          else f"（价格已在 MA{BG.GATE_MA} 下方，只建 {round(bg * 100)}%）")
                 rtail = ("" if rr >= 1.0
                          else f"（来路 {o.get('range_src')}，只建 {round(rr * 100)}%）")
-                note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
-                        f"{gtail}{rtail}（4H 突破后再加到峰值）")
+                if real > 0:
+                    # 手上已有的不重复买。base_held 是「该持有多少」，
+                    # 差额才是这一单要买的。缺了这一步，UP→RANGE 会让
+                    # regime_start 变化 → 再发一张全额建仓单 → 同一份底仓买两遍。
+                    delta = round(amt) - round(real)
+                    if delta <= 0 or delta < PC.min_order_value(o["c"]):
+                        continue
+                    note = (f"日线 {rs} 起为 {st}，底仓应在场 {round(amt)} U；"
+                            f"已持有 {round(real)} U，本单补 {delta} U"
+                            f"{gtail}{rtail}（4H 突破后再加到峰值）")
+                    amt = delta
+                    o["target"] = delta      # 工单金额取差额，不是全额
+                else:
+                    note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
+                            f"{gtail}{rtail}（4H 突破后再加到峰值）")
         else:
             continue                      # 已触发 = action 已是「开仓」，不重复
         # 去重键必须带 rr：系数从 1.0 调到 0.5 时底仓金额跟着变，
@@ -434,6 +530,9 @@ def main():
     pay = {"asof": now.strftime("%Y-%m-%d %H:%M UTC"),
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
            "bar4h": bar, "capital": PC.CAPITAL, "allow_short": PC.ALLOW_SHORT,
+           "mode": "合约（含做空）" if PC.ALLOW_SHORT else "纯现货（不做空）",
+           # 手上真实持有的现货底仓（从工单台账推），给 hold 页与邮件做「有货才提示卖」
+           "spot_held": {k: round(v) for k, v in held.items()},
            # 生效配置留痕：三个月后回看「当时到底开没开」不用翻代码
            "vt": {"on": VT.ENABLED, "lb": VT.LB, "target": VT.TARGET,
                   "lo": VT.LO, "hi": VT.HI, "kappa": VT.KAPPA,
@@ -445,7 +544,7 @@ def main():
               ensure_ascii=False, separators=(",", ":"), default=str)
 
     print(f"\n数据截止 4H：{pay['bar4h']}   生成于 {pay['asof']}"
-          f"   资金基准：{PC.CAPITAL:,.0f} U")
+          f"   资金基准：{PC.CAPITAL:,.0f} U   模式：{pay['mode']}")
     print(f"需要动作：{len(urgent)} 个" + (("  → " + " ".join(pay['urgent'])) if urgent else "（全部无需动作）"))
     if errs:
         print(f"取数失败 {len(errs)} 个：{[e['c'] for e in errs]}")

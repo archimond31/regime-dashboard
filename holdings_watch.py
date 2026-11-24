@@ -110,18 +110,25 @@ def analyze_one(h):
     if state == "UP":
         rec, why = "HOLD", "日线 UP，顺趋势持有"
     elif state == "RANGE":
-        # 与 portfolio_config.RANGE_RATIO_BY_SRC 同源：UP→RANGE 1.0 / DOWN→RANGE 0.5。
-        # 两侧口径必须一致，否则会出现「策略让你持半仓、面板让你满仓」的自相矛盾。
+        # 与 portfolio_config.RANGE_RATIO_BY_SRC 同源：UP→RANGE 1.0 / DOWN→RANGE 0.0（当前）。
+        # 两侧口径必须一致，否则会出现「策略让你清仓、面板让你满仓」的自相矛盾。
         prev, j = None, st_i - 1
         while j >= 0 and reg.get(dates[j]) is None:   # 跳过空洞日
             j -= 1
         if j >= 0:
             prev = reg.get(dates[j])
         size = PC.RANGE_RATIO_BY_SRC.get(prev, PC.RANGE_RATIO_DEFAULT)
-        rec = "HOLD"
-        why = (f"日线 RANGE（由 {prev} 转入），按策略持有 {size * 100:.0f}% 底仓"
-               if prev else
-               f"日线 RANGE，按策略持有 {size * 100:.0f}% 底仓")
+        if size <= 0:
+            # 系数已经是 0（DOWN→RANGE 当前就是 0）→ 策略要的是清空，不能说 HOLD。
+            # 2026-11-20 把 DOWN 从 0.5 改回 0.0 时才发现这里会自相矛盾。
+            rec = "TRIM"
+            why = (f"日线 RANGE（由 {prev} 转入），按策略清空底仓（系数 0）"
+                   if prev else "日线 RANGE，按策略清空底仓（系数 0）")
+        else:
+            rec = "HOLD"
+            why = (f"日线 RANGE（由 {prev} 转入），按策略持有 {size * 100:.0f}% 底仓"
+                   if prev else
+                   f"日线 RANGE，按策略持有 {size * 100:.0f}% 底仓")
     else:  # DOWN
         if blood_v == "init_ma120":
             rec, why = "WATCH", "日线 DOWN 但血统为初始化（不可纠错，可能误判），先观察"

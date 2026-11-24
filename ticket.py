@@ -55,6 +55,9 @@ COLOR = {"开仓": "#c62828", "平仓": "#2e7d32", "止损临近": "#ef6c00",
          "即将到期": "#6a1b9a", "清底仓": "#d84315", "建底仓": "#1565c0"}
 BAR_FMT = "%Y-%m-%d %H:%M"
 ATR_K = 1.5      # 与 bt_skeleton.ATR_K 一致：止损 = 入场 ∓ 1.5×ATR(14)
+# 当前交易模式，印在邮件资金条上 —— 「这封邮件按含做空还是纯现货算的」
+# 是会变的，不写出来只能靠工单里有没有「做空」去猜。
+MODE = "合约（含做空）" if PC.ALLOW_SHORT else "纯现货（不做空）"
 
 
 # ---------------- 台账 ----------------
@@ -128,15 +131,26 @@ def _side(o):
 
 
 def _stop(o, side):
-    """开仓才给新止损；其余动作是把已有仓位处理掉，止损已经在场。"""
-    if o["action"] != "开仓":
-        p = o.get("pos") or {}
-        return p.get("stop")
-    atr = o.get("atr")
-    px = o.get("px")
-    if not atr or not px:
-        return None
-    return round(px - side * ATR_K * atr, 6)
+    """这一单要挂的价格止损；返回 None 表示**没有价格止损**。
+
+    三类的口径不一样，不要混：
+      · 开仓      → 新算 1.5×ATR(14)（= 入场 ∓ k×ATR，与 bt_skeleton.ATR_K 同源）
+      · 平仓类    → 沿用在场那笔的止损（本来就在场，不重新给）
+      · 底仓类    → **None**。建底仓是现货买入，策略里底仓没有价格止损，
+                   唯一退出通道是「日线状态翻 DOWN → 清底仓」（见 portfolio_config.target）。
+                   这不是漏算 —— 但 None 在页面上和「缺 ATR 算不出来」长得一样，
+                   所以 render() 里给「建底仓」单独渲染成「无」，不用「—」。
+    """
+    if o["action"] == "开仓":
+        atr = o.get("atr")
+        px = o.get("px")
+        if not atr or not px:
+            return None
+        return round(px - side * ATR_K * atr, 6)
+    # 平仓 / 止损临近 / 即将到期 → 沿用在场仓位的止损
+    # 建底仓 / 清底仓 → pos 为 None，自然返回 None（现货无止损）
+    p = o.get("pos") or {}
+    return p.get("stop")
 
 
 def new_item(o, bar):
@@ -148,9 +162,15 @@ def new_item(o, bar):
         "kind": o["action"],
         "side": side,
         "notional": _notional(o),
+        # 建单时的本金。notional 是快照、永不更新，改本金后就无法从金额反推
+        # 「这单是按多少钱生成的」—— 存下原值，邮件里才能说清差在哪。
+        "cap": PC.CAPITAL,
         "ref_px": o.get("px"),
         "stop": _stop(o, side),
         "state": o.get("state"),
+        # 在场仓位的方向（+1 多 / -1 空），只用来判断「平仓类单是不是在平空」。
+        # 单看 side 不行：平多也是卖。
+        "pos_side": (o.get("pos") or {}).get("side", 0),
         "regime_start": o.get("regime_start"),
         "bar": bar,                      # 建单时的那根 4H（UTC）
         "created": o.get("bar"),
@@ -202,7 +222,8 @@ def sync(sig=None):
         if k not in live:
             live[k] = dict(o, action="建底仓",
                            note=f'日线 {o.get("regime_start") or bar} 起为 {o["state"]}，'
-                                f'底仓应在场（4H 突破后再加到峰值）')
+                                f'底仓应在场（4H 突破后再加到峰值）；'
+                                f'退出：日线翻 DOWN 即清底仓，现货无价格止损')
 
     opened = 0
     opened_ids = []
@@ -222,6 +243,19 @@ def sync(sig=None):
     voided = 0
     for i in items:
         if i["status"] != "open":
+            continue
+        # 纯现货模式下，做空性质的单直接作废。
+        # 不能只看 side：平多也是卖（side=-1），误杀会把「止损临近·多」清掉。
+        # 所以判据用「开仓且 side<0」+ 新单里记下的 pos_side<0（平空/空头止损）。
+        # 老单没有 pos_side 字段，只能靠 kind == 开仓 抓 —— 够用：
+        # 空头持仓在切纯现货后不再产生，历史空单本来就是模拟的。
+        if not PC.ALLOW_SHORT and i["kind"] != "清底仓" and (
+                (i["kind"] == "开仓" and i.get("side", 1) < 0)
+                or i.get("pos_side", 0) < 0):
+            i["status"] = "void"
+            i["void_note"] = "已切纯现货模式（ALLOW_SHORT=False），做空类单作废"
+            i["settled_at"] = bar
+            voided += 1
             continue
         note = None
         if i["kind"] in ("清底仓", "建底仓"):
@@ -302,18 +336,21 @@ def mark_notified(ids):
     return hit
 
 
-def _cur_targets():
-    """当前 _signal.json 里各币的建议名义 —— 用来发现「工单金额已过时」。
+def _cur_sig():
+    """当前 _signal.json 的逐币快照 —— 用来发现「工单金额已过时」。
 
-    波动目标化（vol_target）每 7 天会重新算一次系数，同一张工单挂上一天，
-    金额就可能和最新信号不一样了。不提示的话，人会照着旧数字下单。
+    两种过时：
+      · 波动目标化（vol_target）每 7 天重算系数 → 建仓类金额变了；
+      · **改本金**（5000→2000）→ 平仓类的金额会差整整 2.5 倍。
+    不提示的话，人会照着旧数字下单。所以两个都要原文取回来。
     """
     try:
         with open(SIG, encoding="utf-8") as f:
             d = json.load(f)
-        return {o["c"]: o.get("target") for o in d.get("coins", [])}
+        return ({o["c"]: o for o in d.get("coins", [])},
+                d.get("capital") or PC.CAPITAL)
     except Exception:
-        return {}
+        return {}, PC.CAPITAL
 
 
 def render():
@@ -324,9 +361,23 @@ def render():
         return ('<div style="border:1px solid #c8e6c9;background:#f1f8f4;border-radius:8px;'
                 'padding:12px 14px;margin:18px 0;font-size:13px;color:#1b5e20">'
                 '<b>没有待执行工单。</b>上一批动作都已结算。</div>')
-    CUR = _cur_targets()
+    CUR, SIG_CAP = _cur_sig()
+
+    # 平仓/清底仓的金额该是多少 —— 口径和建仓类**不一样**，不能拿 target 比。
+    # 两类都按「现在的本金」重算：改本金后这里是唯一能发现「多平 2.5 倍」的地方。
+    def _expect(i):
+        w = PC.WEIGHTS.get(i["coin"], 0.0)
+        if i["kind"] == "清底仓":
+            bh = (CUR.get(i["coin"]) or {}).get("base_held")
+            return bh if bh else PC.CAPITAL * w * PC.BASE_RATIO
+        if i["kind"] in ("平仓", "止损临近", "即将到期"):
+            k = (PC.BASE_RATIO + PC.ADD_RATIO) if i.get("regime") == "UP" else PC.ADD_RATIO
+            return PC.CAPITAL * w * k
+        return None
 
     rows = ""
+    buy_sum = sell_sum = 0.0
+    stale_n = 0        # 有多少张单的原始金额已过时（需要换算）
     for i in op:
         c = COLOR.get(i["kind"], "#1a1a1a")
         ex = expired(i)
@@ -346,29 +397,61 @@ def render():
         else:
             age_sub = ""
         sgn = "买入" if i["side"] > 0 else "卖出"
-        # 只对「建仓类」工单比对当前信号：平仓/清底仓的 notional 是「要平掉的量」，
-        # 和当前建议名义本来就不是一个东西，比了会误导。
-        cur = CUR.get(i["coin"])
+        # 建仓类比「现信号建议名义」；平仓/清底仓比「按现本金该平多少」。
+        # 两者是不同的问题，混用会误导（target 是建议开多大，notional 是要平多少）。
+        cur = (CUR.get(i["coin"]) or {}).get("target")
+        if i["kind"] in ("开仓", "建底仓"):
+            ref, why = cur, "系数/闸门已变"
+        else:
+            ref, why = _expect(i), "本金已变"
+        # 老单没存 cap 字段；存了的就能确指「这是按 5000 生成的」
+        if i.get("cap") and abs(i["cap"] - PC.CAPITAL) > 1.0:
+            why = f"按 {i['cap']:,.0f} U 本金生成"
         drift = ""
-        if (i["kind"] in ("开仓", "建底仓") and cur is not None and i["notional"]
-                and abs(cur - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
+        # 主数字用**现口径**：这封邮件是拿来下单的。主数字写 477、小字写「现口径 200」，
+        # 等于让最容易被误读的那个数占主导 —— 5000→2000 那次就是这么下错的风险。
+        # 台账里的 notional 仍保留建单时的原值（它是历史记录，不该被改写）。
+        disp = i["notional"]
+        if (ref is not None and i["notional"]
+                and abs(ref - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
+            disp = ref
             drift = (f'<div style="font-size:11px;color:#ef6c00;margin-top:2px">'
-                     f'⚠ 现信号 {cur:,.0f} U（波动系数/底仓闸门已变，按现信号下）</div>')
+                     f'⚠ 原单 {i["notional"]:,.0f} U（{why}，已换算）</div>')
+            stale_n += 1
+        # 汇总按**现口径**走：把 5000 时代的旧数字加起来会虚报总需求，
+        # 那正好是这张表最容易被误读的地方（560U 的卖单会让人以为手上有 560U 的货）。
+        eff = abs(disp)
+        if i["side"] > 0:
+            buy_sum += eff
+        else:
+            sell_sum += eff
         px = i["ref_px"]
         pxs = (f"{px:,.4f}" if px is not None and abs(px) < 10
                else (f"{px:,.2f}" if px is not None else "—"))
         stp = i["stop"]
-        stps = "—" if stp is None else (
-            f"{stp:,.4f}" if abs(stp) < 10 else f"{stp:,.2f}")
+        if stp is not None:
+            stps = f"{stp:,.4f}" if abs(stp) < 10 else f"{stp:,.2f}"
+        elif i["kind"] == "建底仓":
+            # 现货新建仓没有价格止损（策略如此，不是漏算）。
+            # 用「无」而不是「—」：两者含义不同，且单个汉字几乎不占宽 ——
+            # 写成「无（现货）」会把「挂起」列挤出边框（这列是 nowrap 的）。
+            stps = '<span style="color:#8d6e63">无</span>'
+        else:
+            stps = "—"
         # note 里可能有 "> 85%" 这种字符，裸放进 HTML 会把标签截断
+        # note 是建单时拼好的，里面**嵌着旧金额**（"底仓 293 U 应在场"）。
+        # 主数字已经换算成 136，note 还写 293 就是同一行里自相矛盾。
+        note_txt = i.get("note") or ""
+        if note_txt and disp != i["notional"]:
+            note_txt = note_txt.replace(f'{i["notional"]:,.0f} U', f'{disp:,.0f} U')
         note = (f'<div style="font-size:11px;color:#757575;margin-top:3px;line-height:1.5">'
-                f'{html.escape(i["note"])}</div>' if i.get("note") else "")
+                f'{html.escape(note_txt)}</div>' if note_txt else "")
         rows += (
             f'<tr style="background:{bg}">'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;color:#9e9e9e">#{i["id"]}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:14px"><b>{i["coin"]}</b></td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;color:{c};font-weight:600">'
-            f'{sgn} {i["notional"]:,.0f} U{drift}</td>'
+            f'{sgn} {disp:,.0f} U{drift}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px">'
             f'<span style="color:{c}">{html.escape(LAB.get(i["kind"], i["kind"]))}</span>{note}</td>'
             f'<td style="padding:9px 8px;border-bottom:1px solid #e0e0e0;font-size:13px;text-align:right;'
@@ -383,6 +466,22 @@ def render():
         cmd += (f"python fill_log.py add {i['coin']} {i['side']:+d} {i['notional']} "
                 f"{i['ref_px']} &lt;成交均价&gt;\n")
     ex_n = sum(1 for i in op if expired(i))
+    # 本金条：这行以前没有，导致「邮件里到底按多少钱算的」只能从金额反推。
+    # 改成 2000 之后必须显式印出来 —— 否则 5000 口径的旧工单混在里面看不出来。
+    gross = sum(abs(o.get("target") or 0) for o in CUR.values())
+    lev = (gross / PC.CAPITAL) if PC.CAPITAL else 0.0
+    stale_cap = (SIG_CAP and abs(SIG_CAP - PC.CAPITAL) > 1.0)
+    bar = (f'<div style="padding:7px 12px;background:#fffaf5;border-bottom:1px solid #f0d9d9;'
+           f'font-size:12px;color:#5d4037">'
+           f'本金 <b style="font-size:13px">{PC.CAPITAL:,.0f} U</b>'
+           f'　模式 <b>{html.escape(MODE)}</b>'
+           f'　在场毛敞口 <b>{gross:,.0f} U</b>（{lev:.2f}×）'
+           f'　待买 <b>{buy_sum:,.0f} U</b> / 待卖 <b>{sell_sum:,.0f} U</b>'
+           + (f'　<span style="color:#ef6c00">⚠ {stale_n} 张单的原金额已过时，表中已按现口径换算</span>'
+              if stale_n else '')
+           + (f'　<span style="color:#7b1fa2">⚠ 信号文件本金 {SIG_CAP:,.0f} U 与本配置不一致</span>'
+              if stale_cap else '')
+           + '</div>')
     heads = ["#", "币", "动作 / 名义", "类型", "参考价", "止损", "挂起"]
     hali = ["left", "left", "left", "left", "right", "right", "right"]
     head = (f'<div style="border:2px solid #c62828;border-radius:8px;margin:18px 0;background:#fff5f5">'
@@ -390,6 +489,7 @@ def render():
             f'font-weight:600;border-radius:6px 6px 0 0">'
             f'待执行工单 {len(op)} 张'
             + (f'（其中 {ex_n} 张已过期）' if ex_n else '') + '</div>'
+            + bar +
             f'<table style="width:100%;border-collapse:collapse">'
             f'<tr style="background:#fafafa">'
             + "".join(f'<th style="padding:6px 8px;text-align:{al};font-size:11px;'
@@ -402,7 +502,12 @@ def render():
             f'python ticket.py done &lt;编号&gt; &lt;成交均价&gt;</code>　'
             f'放弃：<code style="background:#fff;padding:1px 5px;border:1px solid #e0e0e0">'
             f'drop &lt;编号&gt;</code><br>'
-            f'「参考价」是信号那根 4H 的收盘价，不是限价 —— 隔久了照这个价挂不上。</div></div>')
+            f'「参考价」是信号那根 4H 的收盘价，不是限价 —— 隔久了照这个价挂不上。<br>'
+            f'<b>「止损」有三种取值，含义不同：</b>'
+            f'<b>数字</b>＝1.5×ATR(14) 硬止损（只有「开仓」新给，平仓类沿用在场那笔）；'
+            f'<b>无</b>＝建底仓是现货买入，策略里底仓没有价格止损，'
+            f'退出只走「日线状态翻 DOWN → 清底仓」这一条；'
+            f'<b>—</b>＝卖出单本来就不需要止损，或该单缺 ATR 算不出。</div></div>')
     return head
 
 
