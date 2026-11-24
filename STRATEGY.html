@@ -565,6 +565,41 @@ li>ul,li>ol{margin:4px 0;}
 </table>
 <p><strong>收益与回撤同步线性放大</strong>（每 0.5 档约 +28 万 / −6.8pp），Calmar 单调下降。这是加 beta，不是加 alpha：DOWN→RANGE 的 201 段赢面 53%、赢时平均 +12.23%、输时平均 −12.88%，是几乎完美对称的随机游走，均值 +0.49% 小到无法覆盖波动。滚动 250 日 A1/A2 都是 60/97 胜 A0，但最差分别是 −10.9pp / −21.0pp。恶化全部来自 2022；<strong>2024-2026 段三档回撤都是 −37%</strong>。</p>
 <p><strong>这是风险偏好选择，不是改进了策略。</strong> 想换回低回撤版：<code>RANGE_RATIO_BY_SRC["DOWN"] = 0.0</code>；想满仓：<code>= 1.0</code>。</p>
+<blockquote>
+<p><strong>2026-11-20 晚间的回滚记录（重要，别重犯）</strong></p>
+<p>曾一度改成 <code>DOWN = 0.0</code>，理由是「5 万口径下全期 Calmar 2.20→2.73、22 起 1.75→2.14 且收益不动，像白送的降险」。
+<code>_verify_dn0.py</code> 的 walk-forward 一做就否掉了：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分窗口 2024 起（不含 2022 的独立样本）</td>
+<td>Calmar <strong>4.21 → 3.73</strong>、年化 <strong>−6.2pp</strong>、回撤反而加深 1.7pp</td>
+</tr>
+<tr>
+<td>分币（12 个）</td>
+<td>只有 <strong>6 个</strong>回撤改善（BTC +7.5pp / LINK +3.5 / HYPE +3.3 好；NEAR −5.1 / UNI −3.9 / DOGE −2.7 差）</td>
+</tr>
+<tr>
+<td>滚动 250 日（22 起）</td>
+<td>回撤更浅 78/154 = <strong>51%</strong>、收益更高 39%</td>
+</tr>
+<tr>
+<td>逐年</td>
+<td>改善全在 2022（−41.9%→−34.3%）；2023 −4.4pp、2024 −1.7pp <strong>全变差</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论：单事件驱动</strong>（只在 2022 兑现），与 <code>cross_fix_init</code>（BNB 2018 一个窗口占 92% 正收益）同构，不达标。
+已回滚到 0.5。教训与 §3.1 正文一致 —— <strong>别拿「全期 Calmar」当依据，那个数被 2022 一次事件决定</strong>；
+要看的是「剔除 2022 的独立窗口」和「分币/滚动的胜率」。上表 179 行其实早就写了
+「滚动 250 日 A1/A2 都是 60/97 胜 A0」，即 A0 只在 37/97 个窗口赢 —— 当时就该发现。</p>
+</blockquote>
 <h3 id="32-50">3.2 权重表（本金 50 万，容量约束模式）</h3>
 <table>
 <thead>
@@ -1511,7 +1546,12 @@ DN<strong>1.0</strong> 也是 5/7（2025 −9.6%）。<strong>半仓正好落在
 <tr>
 <td><code>ALLOW_SHORT</code></td>
 <td>True</td>
-<td>False = 纯现货模式（DOWN 清仓不做空）</td>
+<td>策略层：算不算空头（False = 连信号都不产生）</td>
+</tr>
+<tr>
+<td><code>EXECUTE_SHORT</code></td>
+<td><strong>True</strong></td>
+<td>执行层：账户整体做不做空。应急闸门，见 §8.5</td>
 </tr>
 </tbody>
 </table>
@@ -1558,6 +1598,118 @@ DN<strong>1.0</strong> 也是 5/7（2025 −9.6%）。<strong>半仓正好落在
 </tbody>
 </table>
 <p>前视虚增 101 万。<strong>任何自定义风险规则都必须做"平移一格"回归检查。</strong></p>
+<h3 id="85-vs">8.5 策略能力 vs 账户执行：「空头」有两个独立问题</h3>
+<p>空头这块一次性踩了两个不同的坑，值得分开记：</p>
+<p><strong>坑一：把"策略不做空"和"账户不执行空头"合成一个开关。</strong>
+2026-11-24 一度设 <code>ALLOW_SHORT = False</code>，当天回滚。用 <code>ALLOW_SHORT</code> 去表达
+"我不执行空头"，会把信号生成一起砍掉 —— 回测口径变了、空头研究没了、
+以后想做空得重改回来；而 <code>_q_longonly.py</code> 量到的 121.4%→101.2%
+是<strong>另一个策略</strong>的成绩，不是"关掉执行"的代价。</p>
+<p><strong>坑二：把"账户不做空"和"这一笔空头没建过"混为一谈。</strong>
+用户的态度是「有空信号出现肯定是要空的」—— 空头不是可选项，是策略的一半。
+但策略书里 BTC/ETH/BNB/DOGE 四个空头是 <strong>11-09 入场、系统 11-24 才上线</strong>，
+从来没有对应的开仓单被执行过。它们进入平仓/止损时，发单就是让人去平一个
+不存在的仓。这两件事必须分开处理。</p>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>现值</th>
+<th>管什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ALLOW_SHORT</code></td>
+<td><code>True</code></td>
+<td><strong>策略层</strong>：算不算空头。改 False = 连信号都不产生，等于换了个策略</td>
+</tr>
+<tr>
+<td><code>EXECUTE_SHORT</code></td>
+<td><code>True</code></td>
+<td><strong>执行层</strong>：账户整体做不做空。只作"哪天只想跑纯现货"的应急闸门</td>
+</tr>
+</tbody>
+</table>
+<p>判据合成一条：<code>PC.executable(action, side, pos_side, has_pos)</code></p>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开仓·空</td>
+<td><code>EXECUTE_SHORT</code>（<strong>有信号就空</strong>）</td>
+</tr>
+<tr>
+<td>持有·空</td>
+<td><code>EXECUTE_SHORT and has_pos</code>（决定页面标不标"未建仓"）</td>
+</tr>
+<tr>
+<td>平仓/止损/到期 · 空头</td>
+<td><code>EXECUTE_SHORT and has_pos</code>（没建过的仓没有可平的量）</td>
+</tr>
+<tr>
+<td>开仓·多 / 平多 / 建底仓 / 清底仓</td>
+<td><code>True</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>has_pos</code> 由 <code>live_signals.short_opened()</code> 从工单台账推（有没有 done 的「开仓·空」）。
+<strong>这是"未建仓"与"纸面"的唯一区别</strong>：前者是"错过了入场"，后者是"账户没这功能"。</p>
+<p>同一时点两个净敞口，必须都印：</p>
+<table>
+<thead>
+<tr>
+<th>口径</th>
+<th>多头</th>
+<th>空头</th>
+<th>净敞口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>策略书（含未建仓空头）</td>
+<td>+1,004 U</td>
+<td>−580 U</td>
+<td><strong>+424 U（0.21×）</strong></td>
+</tr>
+<tr>
+<td>实盘</td>
+<td>+1,004 U</td>
+<td>0</td>
+<td><strong>+1,004 U（0.50×）</strong></td>
+</tr>
+</tbody>
+</table>
+<p>差 2.4 倍。<strong>风控看后者，判断策略状态看前者。</strong></p>
+<p><strong>必须同步的四处代码</strong>（只改常量不改这四处，信号会自相矛盾）：</p>
+<ol>
+<li><code>portfolio_config.executable(...)</code> —— 唯一判据来源。
+   <code>live_signals</code> 标在信号的 <code>exec</code> 字段上、<code>ticket.sync</code> 据此过滤工单，
+   <strong>两处判据不一致就会出现"信号说不执行、工单还是开了"的静默分叉</strong>。
+   平仓类看 <code>pos_side</code>，不能看 <code>side</code>（平多也是卖，会误杀「止损临近·多」）。</li>
+<li><code>bt_skeleton.signals(..., allow_short=)</code> —— 默认值仍是 <code>True</code>，为了不动 20 多个
+   <code>_exp_*</code> / <code>_verify_*</code> 的历史结论；生产由 <code>live_signals</code> 显式传 <code>PC.ALLOW_SHORT</code>。</li>
+<li><code>live_signals.spot_held()</code> —— 从<strong>工单台账</strong>推"手上真实持有的现货底仓"
+   （done 的建底仓 − done 的清底仓；只有未结算建仓单则按该单金额，用
+   <code>min(快照, 当前 target)</code> 收窄 5000 时代的旧值）。
+   <code>清底仓</code> 只在 <code>held &gt; 0</code> 时生成、金额取 <code>min(base_held, held)</code>；
+   <code>建底仓</code> 只发差额（<code>base_held − held</code>）。
+   <strong>不做这层，"清底仓"会去卖他从没买过的币</strong> —— BTC/ETH/BNB/DOGE/NEAR 五个
+   DOWN 币本来就会各生成一张 358/261/301/239/108 U 的卖单。
+   同一个思路也被 <code>short_opened()</code> 复用到了空头侧。</li>
+<li><code>ticket.sync()</code> —— 按信号的 <code>exec</code> 字段过滤；<code>EXECUTE_SHORT=False</code> 时
+   额外作废做空类未结算单，判据用「<code>kind == 开仓</code> 且 <code>side &lt; 0</code>」或 <code>pos_side &lt; 0</code>。</li>
+</ol>
+<p><strong>那 4 笔未建仓的空头要不要补进去</strong>：不补。BTC 入场 74,851、现价 60,436，
+策略的止损在 76,001（距现价 25.7%）；正常一笔的风险是 1.5ATR ≈ 2~3%。
+现在补进去等于用 10 倍的止损距离去博已经消耗掉 12.5R 的残余行情。
+<code>_diag_late_entry.py</code> 实测延迟 86 根 4H 后剩余期望 <strong>+0.067R</strong>，统计上归零。
+正确处理是让它们自然走到平仓，<strong>下一个新出现的做空信号正常执行</strong>。</p>
 <hr />
 <h2 id="9">9. 已知未解决问题</h2>
 <table>
@@ -1587,7 +1739,7 @@ DN<strong>1.0</strong> 也是 5/7（2025 −9.6%）。<strong>半仓正好落在
 <tr>
 <td>P1</td>
 <td>空头资金费符号是假设（空头应付还是应收未校准）</td>
-<td>影响空头净收益</td>
+<td>影响空头净收益（当前空头只记纸面，暂不影响实盘）</td>
 </tr>
 <tr>
 <td>P2</td>
@@ -1677,6 +1829,12 @@ DN<strong>1.0</strong> 也是 5/7（2025 −9.6%）。<strong>半仓正好落在
 <td>—</td>
 <td>口径 B 从 5.82× 重算为 <strong>10.65×</strong></td>
 <td>补 <code>_exp_cum_b.py</code>（旧脚本未保留）；自检臂 <code>B_q</code> 复现口径 C 27.95×/−54.9% 后采信</td>
+</tr>
+<tr>
+<td>2026-11-24</td>
+<td>—</td>
+<td><code>EXECUTE_SHORT</code> 加 <code>has_pos</code> 基线，默认回 True</td>
+<td>空头不是可选项（「有空信号出现肯定是要空的」）；但 11-09 入场的 4 笔从未下单，平仓时不能让人去平不存在的仓。状态标「未建仓」区别于「纸面」。见 §8.5</td>
 </tr>
 </tbody>
 </table>
