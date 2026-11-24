@@ -28,6 +28,9 @@ BG_MA = (d.get("basegate") or {}).get("ma", 50)
 # 配置」一致，而不是和「此刻的代码」一致（两者可能因为重新部署而不同步）。
 SHORT_ON = bool(d.get("allow_short", True))
 EXEC_SHORT = bool(d.get("execute_short", True))
+# 策略书记录了空头、但账户从没建过的那几个（11-09 入场，系统 11-24 才上线）。
+# 与"不做空"是两件事：这几个只影响「平掉一个不存在的仓」，不影响新开空信号。
+UNOPENED = d.get("unopened") or []
 MODE_TXT = d.get("mode") or ("合约（含做空）" if SHORT_ON else "纯现货（不做空）")
 if SHORT_ON and EXEC_SHORT:
     MODE_SHORT = "含做空·执行"
@@ -126,16 +129,21 @@ if holds:
             # 状态格单独拼：不能在 f-string 的表达式里写转义引号，
             # Python 3.11 及更早会直接报 SyntaxError（PEP 701 到 3.12 才允许）
             + (f'<b style="color:{DN}">已翻转</b>' if p["flipped"] else
-               ('<span style="color:#6a1b9a">纸面</span>'
-                if not o.get("exec", True) else "持有"))
+               ('<span style="color:#6a1b9a" title="策略书在场，账户没建过这笔">未建仓</span>'
+                if o.get("paper_why") == "no_pos" else
+                ('<span style="color:#6a1b9a">纸面</span>'
+                 if not o.get("exec", True) else "持有")))
             + '</td></tr>')
     _paper_n = sum(1 for o in holds if not o.get("exec", True))
-    if not _paper_n:
-        _ptxt = ""
-    elif _paper_n == len(holds):
-        _ptxt = " · 全部纸面，本账户不下单"
-    else:
+    _unop_n = sum(1 for o in holds if o.get("paper_why") == "no_pos")
+    if _unop_n and _unop_n == len(holds):
+        _ptxt = " · 全部未建仓（策略书在场，账户没建过）"
+    elif _unop_n:
+        _ptxt = f" · {_unop_n} 个未建仓"
+    elif _paper_n:
         _ptxt = f" · {_paper_n} 个纸面，本账户不下单"
+    else:
+        _ptxt = ""
     _htitle = f'当前持仓（{len(holds)} 个{_ptxt}）'
     hold_block = (
         f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">{_htitle}</h2>'
@@ -148,9 +156,13 @@ if holds:
         f'「入场时间」为北京时间（UTC+8），即那根 4H 的收盘时刻——不是下单时刻。'
         f'「剩余兜底」= 距满 {120} 根 4H 强制平仓还剩多少根。到 0 就按收盘价平。</div>'
         + (f'<div style="font-size:12px;color:#6a1b9a;margin-top:4px;line-height:1.8">'
-           f'<b>「纸面」= 策略算得出、但本账户不执行的仓位</b>（现货账户不做空）。'
-           f'它照常参与状态判断、净敞口与回测统计，唯一区别是不发工单、不占保证金。</div>'
-           if _paper_n else ''))
+           f'<b>「未建仓」= 策略书里在场、账户从没建过这笔</b>：这几个空头在系统上线前'
+           f'（11-09）就入场了，当时的价距现在已远，止损位置失去意义，没有追。'
+           f'影响仅限「它们的平仓单不用执行」；<b>新出现的做空信号照常发单</b>，'
+           f'该怎么空就怎么空。</div>' if _unop_n else '')
+        + (f'<div style="font-size:12px;color:#6a1b9a;margin-top:4px;line-height:1.8">'
+           f'<b>「纸面」= 策略算得出、但本账户不执行的仓位。</b></div>'
+           if _paper_n and not _unop_n else ''))
 else:
     hold_block = (f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">当前持仓（4H 永续层）</h2>'
                   f'<div style="font-size:13px;color:{MU};padding:10px 0">4H 层全部空仓。</div>')
@@ -198,11 +210,11 @@ if _SPOT:
         f'现货底仓没有价格止损，唯一退出通道是「日线翻 DOWN → 清底仓」。'
         + (f'<br><b>两个净敞口不要混用</b>：策略书 '
            f'{sum(o.get("target") or 0 for o in COINS) / (_CAP or 1):+.2f}×'
-           f'（含纸面空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'
+           f'（含未建仓空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'
            f'风控看后者，判断策略状态看前者。'
-           if not EXEC_SHORT else '')
-        + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无底仓 —— 规则要求的状态'
-           f'（{("空头信号只记策略书，本账户不下单" if SHORT_ON and not EXEC_SHORT else "不做空")}）。'
+           if (UNOPENED or not EXEC_SHORT) else '')
+        + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无现货底仓 —— 规则要求的持仓状态'
+           f'（空头是永续层的事，与现货底仓无关）。'
            if _flat else '')
         + '</div>')
 else:
@@ -214,15 +226,19 @@ for o in COINS:
     st = o["state"]
     g = o["gate"]
     if o["pos"]:
-        # 空头仓在现货账户里只记纸面，不发工单。不标出来，这个「持有」
-        # 看着就像账户里真有一笔钱在动。
-        act, ac = ("纸面持有" if not o.get("exec", True) else "持有"), MU
+        # 空头仓在策略书里在场、账户没建过时标「未建仓」；账户整体不做空时标「纸面」。
+        # 不标出来，这个「持有」看着就像账户里真有一笔钱在动。
+        if not o.get("exec", True):
+            act = ("未建仓" if o.get("paper_why") == "no_pos" else "纸面")
+        else:
+            act = "持有"
+        ac = MU
         trig, tcol = "—", MU
     else:
         act = o["action"]
         ac = {"开仓": UP, "闸门拦截": "#ef6c00", "空仓": MU}.get(act, MU)
         if not o.get("exec", True):
-            act = f"{act}·纸面"
+            act = f"{act}·未建仓" if o.get("paper_why") == "no_pos" else f"{act}·纸面"
         # need 是「还要走多少百分比」，乘上方向才看得出是涨还是跌：
         # 做多 want=+1 → +5.77%（要涨）；做空 want=-1 → −2.42%（要跌）
         if o.get("need") is not None:

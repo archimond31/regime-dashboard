@@ -137,6 +137,11 @@ def _subj_patrol(sig, holds, bj_hm, op_n):
     paper = sig.get("paper") or []
     if paper:
         s += f' · 纸面 {len(paper)}'
+    # 策略书在场、账户没建过的空头。跟「待办」分开写：它们不需要你去平，
+    # 但你需要知道「策略现在其实是空头状态，而我没在场」。
+    unop = sig.get("unopened") or []
+    if unop:
+        s += f' · 未建仓 {len(unop)}'
     s += f' · 待办 {op_n}'
     if near:
         s += f' · 距{near["c"]}触发{abs(near["need"]):.1f}%'

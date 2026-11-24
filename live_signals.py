@@ -312,11 +312,8 @@ def analyze(c, now, prev_gate=None):
     o["target"] = round(tgt)
     o["side"] = "多" if tgt > 0 else ("空" if tgt < 0 else "—")
     o["target_note"] = why
-    # 这个动作实盘要不要真的下单。空头照算（策略书要它判翻转、算净敞口），
-    # 但现货账户不执行 —— 标出来，ticket.sync 据此决定开不开单。
-    o["exec"] = PC.executable(o["action"],
-                              1 if tgt > 0 else (-1 if tgt < 0 else 0),
-                              (o.get("pos") or {}).get("side", 0))
+    # o["exec"] 不在这里定：它还要看「这笔空头到底建没建过」，
+    # 而那是台账层面的事，逐币 analyze 看不到。统一在 main() 里算一次。
     o["cap_flag"] = PC.cap_check(tgt, c)[1]
     o["slices"] = PC.orders_needed(tgt, c)
 
@@ -431,6 +428,30 @@ def spot_held(cur_tgt=None):
     return {k: v for k, v in held.items() if v > 0}
 
 
+def short_opened():
+    """哪些币**真的被执行过做空开仓** —— 从工单台账的 done 记录推。
+
+    为什么需要它：状态机在 2026-11-09 就给 BTC/ETH/BNB/DOGE 挂了空头，
+    而系统到 11-24 才上线，那几笔从来没有对应的「开仓·空」工单被执行过。
+    策略书里它们在场（浮盈 +12.5R），账户里没有。
+
+    没有这层区分，它们进入平仓/止损时会生成「平掉 X U 空头」的单 ——
+    平的是一个不存在的仓。而**新出现的开仓·空 不受影响，照发**
+    （用户的原话：「有空信号出现肯定是要空的」）。
+    """
+    out = set()
+    try:
+        with open(TICKETS, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return out
+    for i in d.get("items", []):
+        if (i.get("status") == "done" and i.get("kind") == "开仓"
+                and i.get("side", 0) < 0):
+            out.add(i["coin"])
+    return out
+
+
 def main():
     now = _now_utc()
     gs = _load_gate()
@@ -444,6 +465,22 @@ def main():
     # 只更新成功的币；失败的保留旧状态，避免下一根从零开始判
     gs.update({o["c"]: o.get("gate_state") for o in rows})
     _save_gate(gs)
+
+    # ---- 执行口径：这条动作实盘要不要真下单 ----
+    # 必须等所有币都算完再统一判一次：判据里含 has_pos（这笔仓建没建过），
+    # 那是台账层面的事，逐币 analyze() 看不到。
+    _so = short_opened()
+    for o in rows:
+        _ps = (o.get("pos") or {}).get("side", 0)
+        _has = True if _ps >= 0 else (o["c"] in _so)
+        o["exec"] = PC.executable(
+            o["action"],
+            1 if o["target"] > 0 else (-1 if o["target"] < 0 else 0),
+            _ps, _has)
+        # 为什么不下单 —— 页面要分开显示，否则「没这功能」和「这笔没建过」
+        # 长得一样，而处理方式完全不同。
+        o["paper_why"] = (None if o["exec"] else
+                          ("short_off" if not PC.EXECUTE_SHORT else "no_pos"))
 
     # ---- 底仓动作提示（建 / 清）----
     # 底仓的进出此前只体现为 target 数字从正变零或反过来 ——
@@ -520,10 +557,11 @@ def main():
         o["action"] = act
         o["clear_amount"] = amt
         o["note"] = note
-        # 建/清底仓都是现货，与 PC.EXECUTE_SHORT 无关，实盘一律执行。
-        # 必须在这里重算：analyze() 里 action 还是「空仓 / 闸门拦截」，
-        # 到这里才被改写成底仓动作，不重算就保留了旧值（虽然旧值恰好也是 True）。
+        # 建/清底仓都是现货，与做空开关无关，实盘一律执行。
+        # 必须在这里重算：上面的 exec 是按 analyze() 时的 action（空仓/闸门拦截）
+        # 判的，到这里 action 才被改写成底仓动作。
         o["exec"] = True
+        o["paper_why"] = None
         bc[o["c"]] = key
     _save_bc(bc)
 
@@ -537,6 +575,11 @@ def main():
     # 「需要动作 N 个」如果连纸面空头也数进去，等于每封信都在叫醒你去做不会做的事。
     urgent = [o for o in rows if o["action"] in _ACT and o.get("exec", True)]
     paper = [o for o in rows if o["action"] in _ACT and not o.get("exec", True)]
+    # 策略书记录了空头、但账户从没建过的那几个：它们不是"不做的空头"，
+    # 是"错过了入场的空头"。页面上要单列，否则会跟"没这功能"混成一件事。
+    unopened = [o["c"] for o in rows
+                if (o.get("pos") or {}).get("side", 0) < 0
+                and o.get("paper_why") == "no_pos"]
     # 以「所有品种里最新的那根已收盘 4H」为准，各币数据源不同、可能差一根
     bar = max((o["bar"] for o in rows), default=None)
     if PC.ALLOW_SHORT and PC.EXECUTE_SHORT:
@@ -558,7 +601,8 @@ def main():
            "basegate": {"on": BG.ENABLED, "ma": BG.GATE_MA, "cv": BG.GATE_CV,
                         "hyst": BG.GATE_HYST},
            "coins": rows, "urgent": [o["c"] for o in urgent],
-           "paper": [o["c"] for o in paper], "errors": errs}
+           "paper": [o["c"] for o in paper], "unopened": unopened,
+           "errors": errs}
     json.dump(pay, open("_signal.json", "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"), default=str)
 
@@ -567,6 +611,9 @@ def main():
     print(f"需要动作：{len(urgent)} 个" + (("  → " + " ".join(pay['urgent'])) if urgent else "（全部无需动作）"))
     if paper:
         print(f"纸面动作 {len(paper)} 个（策略算到但本账户不执行）：{' '.join(pay['paper'])}")
+    if unopened:
+        print(f"空头未建仓 {len(unopened)} 个（策略书在场、账户没有）："
+              f"{' '.join(unopened)} —— 只影响平仓，不影响新开空信号")
     if errs:
         print(f"取数失败 {len(errs)} 个：{[e['c'] for e in errs]}")
     return pay
