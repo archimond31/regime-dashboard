@@ -54,6 +54,21 @@ def http_get(url, referer=None, timeout=30, retries=3):
 
 
 def fetch_yahoo_daily(symbol, start_dt):
+    """Yahoo 日线。返回 [{date, close, adj}]。
+
+    close = **未复权**收盘（真实市价，用于页面展示）
+    adj   = **复权**收盘（用于状态判定）；Yahoo 未给 adjclose 时退回 close
+
+    为什么必须把两者分开（2026-11-25 实测，_ab_adjclose.py）：
+      ETF 的分红在除息日造成一步式价格下跌，未复权序列因此带**系统性下行漂移**。
+      用同一套状态机分别跑 close 与 adj，2024 年以来状态不同的交易日占比：
+        TLT **25.4%**（年化分配 3~4%，两年累计 6~8%，足以推翻 MA120 穿越）
+        QQQ  8.1%   SPY  4.1%
+      债性资产受影响最大，权益类次之；商品期货无分红，两者恒等。
+    但不能把 adj 直接当价格显示 —— 复权价不是市价（越往前被缩得越多）。
+    所以两个都返回：判定走 adj，展示走 close，均线按 close/adj 的末值比例还原回市价尺度
+    （见 daily_regime_alert.compute_regime 的 k 系数）。
+    """
     time.sleep(0.4)  # 节流：多品种连续请求时避免触发 Yahoo 限流
     p1 = int(start_dt.timestamp())
     p2 = int(datetime.now(timezone.utc).timestamp())
@@ -67,13 +82,15 @@ def fetch_yahoo_daily(symbol, start_dt):
     ts = r.get("timestamp") or []
     q = (r.get("indicators", {}).get("quote") or [{}])[0]
     c = q.get("close") or []
+    ac = (r.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
     rows = []
     for i, t in enumerate(ts):
         close = c[i] if i < len(c) and c[i] is not None else None
         if close is None:
             continue
+        adj = ac[i] if i < len(ac) and ac[i] is not None else close
         rows.append({"date": datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d"),
-                     "close": close})
+                     "close": close, "adj": adj})
     return rows
 
 

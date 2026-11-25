@@ -39,6 +39,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 
 from visualize_btc_regime import daily_states, PROXY
+from visualize_eth_gold_regime import fetch_yahoo_daily as _yahoo
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -150,28 +151,15 @@ def fetch_binance_daily(symbol, start_dt):
 
 
 def fetch_yahoo_daily(symbol, start_dt):
-    p1 = int(start_dt.timestamp())
-    p2 = int(datetime.now(timezone.utc).timestamp())
-    url = (f"https://query2.finance.yahoo.com/v8/finance/chart/{urllib.request.quote(symbol)}"
-           f"?period1={p1}&period2={p2}&interval=1d&includePrePost=false&events=div%2Csplit")
-    raw = http_get(url, referer="https://finance.yahoo.com/")
-    result = json.loads(raw).get("chart", {}).get("result")
-    if not result:
-        raise RuntimeError(f"Yahoo empty result for {symbol}")
-    r = result[0]
-    ts = r.get("timestamp") or []
-    q = (r.get("indicators", {}).get("quote") or [{}])[0]
-    c = q.get("close") or []
-    rows = []
-    for i, t in enumerate(ts):
-        close = c[i] if i < len(c) and c[i] is not None else None
-        if close is None:
-            continue
-        rows.append({
-            "date": datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d"),
-            "close": close,
-        })
-    return rows
+    """**已合并到 visualize_eth_gold_regime.fetch_yahoo_daily。**
+
+    2026-11-25 之前这里有一份几乎相同的副本，只取 close（未复权）。两份实现
+    早晚会漂移：面板用那份、邮件用这份，同一品种可能在页面写「上升」、邮件写
+    「震荡」，而没人看得出来是数据口径不同。现在只留一份实现，这里转发。
+
+    返回值新增 adj（复权收盘）字段，判定用它、展示用 close —— 理由见被调函数的注释。
+    """
+    return _yahoo(symbol, start_dt)
 
 
 def http_post(url, payload, timeout=30, retries=3):
@@ -212,11 +200,29 @@ def fetch_hyperliquid_daily(symbol):
     return rows
 
 
-def drop_unclosed(rows):
-    """剔除未收盘日线（date >= 今日 UTC）。适用于加密 / 美股 / 商品（按 UTC 日线）。"""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    out = [r for r in rows if r["date"] < today]
-    return out
+# 各市场「当日 bar 从几点（UTC）算完整」。见 drop_unclosed 的说明。
+US_CLOSE_HOUR_UTC = 21        # 16:00 ET；冬令时 21:00Z / 夏令时 20:00Z，取较晚者保守
+FUTURES_CLOSE_HOUR_UTC = 22   # CME Globex 日结算
+
+
+def drop_unclosed(rows, close_hour_utc=0):
+    """剔除未收盘日线。
+
+    close_hour_utc：该市场「当日 bar 从几点（UTC）起算完整」。
+      0  = 加密 / 24×7（UTC 日界，date d 的 bar 在 d+1 00:00Z 收）
+      21 = 美股 / 美股 ETF
+      22 = CME 期货
+
+    为什么不能一律用 `date < today(UTC)`：构建若落在 21:00Z 之后，美股当天**已收盘**
+    的 bar 会被当成未收盘丢掉，于是同一页面上 A 股截至 11-24、美股/商品截至 11-23。
+    跨资产比较时这是系统性错位，不是显示问题。2026-11-24 23:08Z 那次 push 触发的
+    构建就是这样（页面页脚如实写着两个不同截止日）。
+    """
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    if close_hour_utc and now.hour >= close_hour_utc:
+        return [r for r in rows if r["date"] <= today]
+    return [r for r in rows if r["date"] < today]
 
 
 def drop_unclosed_cn(rows):
@@ -311,7 +317,7 @@ def rsi_wilder(closes, n=14):
     return out
 
 
-def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
+def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60, judge=None):
     """G 方案最终状态机回放，返回最后状态的关键字段。
 
     与可视化脚本同源：调用 daily_states（ob=70 / os=30 / 背离 / 两日确认 /
@@ -326,17 +332,28 @@ def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
     交易层（strategy_1h_rsi.regime_and_blood / bt_skeleton.blood_of）一直用
     start_idx = ma_slow，这里现在与之一致：同一套状态机、同一个起点。
     只有「上线不满 ma_slow 根」的品种（HYPE）才真正需要从数据首根起算。
+
+    judge：**判定用**的价格序列（复权收盘）。closes 是展示用的未复权市价。
+           不传则两者合一（加密 / A 股 / 期货，本就没有复权概念）。
+           ETF 必须分开传 —— 分红造成的未复权下行漂移会推翻 MA 穿越，
+           实测 TLT 有 25% 的交易日状态不同（见 fetch_yahoo_daily 注释）。
+           返回的 ma60/ma120 会按 close[-1]/judge[-1] 比例还原回市价尺度，
+           否则「收盘 690、MA120 640」这种对比会被人误读（其实差的是复权因子）。
     """
     _ = start or START   # 保留形参：展示窗口的裁剪在 build()/页面层做，不在这里
+    cj = judge if judge is not None else closes
     last = len(closes) - 1
     s0 = ma_slow
     if s0 >= len(closes):
         return {"state": "N/A", "reason": "insufficient_data",
                 "as_of": dates[last] if dates else ""}
-    st, _div, triggers = daily_states(closes, s0, 70, 30, True, 2, True,
+    st, _div, triggers = daily_states(cj, s0, 70, 30, True, 2, True,
                                       ma_slow=ma_slow, ma_fast=ma_fast)
-    rsi = rsi_wilder(closes)
-    ma60, ma120 = sma(closes, ma_fast), sma(closes, ma_slow)
+    rsi = rsi_wilder(cj)
+    ma60, ma120 = sma(cj, ma_fast), sma(cj, ma_slow)
+    # 复权序列 → 市价尺度。k 在末端恒为 1（Yahoo 的复权因子以最新价为 1），
+    # 但这里仍显式算一遍：将来若改用「以首日为 1」的复权口径，这行能救回来。
+    k = (closes[last] / cj[last]) if cj[last] else 1.0
     state = st[last]
     trigger, since_idx = "init_ma120", s0
     for i in range(last, s0 - 1, -1):
@@ -349,8 +366,8 @@ def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
         "trigger_date": dates[since_idx],
         "close": closes[last],
         "rsi": rsi[last],
-        "ma60": ma60[last],
-        "ma120": ma120[last],
+        "ma60": ma60[last] * k,
+        "ma120": ma120[last] * k,
         "since_days": last - since_idx,
         "as_of": dates[last],
     }
@@ -359,8 +376,9 @@ def compute_regime(closes, dates, start=None, ma_slow=120, ma_fast=60):
 def compute_regime_weekly(rows, start=None):
     """周线状态：同一 G 方案状态机，MA24/MA12（= MA120/MA60 的 ÷5 机械映射）。
 
-    rows 为日线 [{date, close}]；先聚合成周线再回放状态机。
-    周线不足 WEEKLY_MA_SLOW+5 根时返回 N/A（不硬凑结论）。"""
+    rows 为日线 [{date, close, adj}]；先聚合成周线再回放状态机。
+    周线不足 WEEKLY_MA_SLOW+5 根时返回 N/A（不硬凑结论）。
+    判定同样走 adj（若有），展示仍是 close。"""
     from visualize_btc_regime import to_weekly
     start = start or START
     wrows = to_weekly(rows)
@@ -369,7 +387,14 @@ def compute_regime_weekly(rows, start=None):
                 "as_of": wrows[-1]["date"] if wrows else "", "n_weeks": len(wrows)}
     wc = [r["close"] for r in wrows]
     wd = [r["date"] for r in wrows]
-    reg = compute_regime(wc, wd, start=start, ma_slow=WEEKLY_MA_SLOW, ma_fast=WEEKLY_MA_FAST)
+    wj = None
+    if any("adj" in r for r in rows):
+        adj_rows = [{"date": r["date"], "close": r.get("adj") or r["close"]} for r in rows]
+        wadj = to_weekly(adj_rows)
+        if len(wadj) == len(wrows):          # 日期对齐才可用，否则退回未复权
+            wj = [r["close"] for r in wadj]
+    reg = compute_regime(wc, wd, start=start, ma_slow=WEEKLY_MA_SLOW,
+                         ma_fast=WEEKLY_MA_FAST, judge=wj)
     reg["n_weeks"] = len(wrows)
     return reg
 
@@ -553,11 +578,22 @@ def main():
                 rows = fetch_ashare_daily(a)
             else:
                 rows = fetch_yahoo_daily(a["symbol"], warm_dt)
-            # A 股按北京时间 15:00 判断当日是否已收盘，其余按 UTC 日线
-            rows = drop_unclosed_cn(rows) if a["source"] == "ashare" else drop_unclosed(rows)
+            # 各市场按自己的收盘时钟剔除未收盘 bar（A 股 15:00 北京、美股 21:00Z、
+            # 期货 22:00Z、加密 UTC 日界）。理由见 drop_unclosed。
+            if a["source"] == "ashare":
+                rows = drop_unclosed_cn(rows)
+            elif a["source"] in ("binance", "hyperliquid"):
+                rows = drop_unclosed(rows, 0)
+            else:
+                rows = drop_unclosed(
+                    rows, FUTURES_CLOSE_HOUR_UTC if a["symbol"].endswith("=F")
+                    else US_CLOSE_HOUR_UTC)
             closes = [r["close"] for r in rows]
             dates = [r["date"] for r in rows]
-            reg = compute_regime(closes, dates)
+            # 判定走复权（ETF 有分红漂移），展示走市价 —— 与面板同一口径，
+            # 否则邮件说「上升」、页面说「震荡」，而看不出是数据口径不同。
+            jd = [r.get("adj") or r["close"] for r in rows]
+            reg = compute_regime(closes, dates, judge=jd)
             wreg = compute_regime_weekly(rows)
             gate, gate_note = resonance_gate(reg["state"], wreg.get("state"))
             reports.append({"key": a["key"], "label": a["label"],

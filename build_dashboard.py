@@ -34,6 +34,7 @@ from daily_regime_alert import (
     resonance_gate, GATE_CN, trig_cn,
     STATE_CN, STATE_COLOR, TRIGGER_CN, fmt_price, WARM_START, START,
     drop_unclosed, drop_unclosed_cn,
+    US_CLOSE_HOUR_UTC, FUTURES_CLOSE_HOUR_UTC,
 )
 
 MIN_DAYS = 3
@@ -90,9 +91,36 @@ def fetch_asset(a, warm_dt):
     return fetch_yahoo_daily(a["symbol"], warm_dt)
 
 
+def close_hour_of(a):
+    """该品种所在市场的收盘时刻（UTC 小时）。0 = 加密 UTC 日界。
+
+    A 股不用这个（走 drop_unclosed_cn 的北京时间 15:00 逻辑），返回 None。
+    商品用 22（CME Globex 日结算），美股 ETF 用 21（16:00 ET）。
+    """
+    if a["source"] == "ashare":
+        return None
+    if a["source"] in ("binance", "hyperliquid"):
+        return 0
+    return FUTURES_CLOSE_HOUR_UTC if a["symbol"].endswith("=F") else US_CLOSE_HOUR_UTC
+
+
 def trim_unclosed(a, rows):
-    """按市场各自的收盘规则剔除未收盘 bar（A 股按北京时间 15:00，其余按 UTC 日线）。"""
-    return drop_unclosed_cn(rows) if a["source"] == "ashare" else drop_unclosed(rows)
+    """按各市场自己的收盘规则剔除未收盘 bar。
+
+    不能用统一的 `date < today(UTC)`：构建落在 21:00Z 之后时，美股当天已收盘的
+    bar 会被误删，页面于是出现「A 股截至 11-24、美股/商品截至 11-23」的错位。"""
+    if a["source"] == "ashare":
+        return drop_unclosed_cn(rows)
+    return drop_unclosed(rows, close_hour_utc=close_hour_of(a) or 0)
+
+
+def judge_series(rows):
+    """状态判定用的价格序列：有复权价就用复权价。
+
+    加密 / A 股 / 商品期货没有分红，adj 恒等于 close，这里等于原样返回。
+    ETF（TLT/SPY/QQQ…）必须走 adj —— 未复权序列带分红造成的下行漂移，
+    实测 TLT 有 25% 的交易日会被判成不同状态。展示仍用 close（真实市价）。"""
+    return [r.get("adj") or r["close"] for r in rows]
 
 
 def _blood_cell(b):
@@ -230,7 +258,8 @@ def main():
             rows = trim_unclosed(a, fetch_asset(a, warm_dt))
             dates = [r["date"] for r in rows]
             closes = [r["close"] for r in rows]
-            reg = compute_regime(closes, dates)
+            jd = judge_series(rows)          # 判定用（ETF 是复权价）；展示仍用 closes
+            reg = compute_regime(closes, dates, judge=jd)
             wreg = compute_regime_weekly(rows)
             wstate = wreg.get("state")
             gate, gate_note = resonance_gate(reg["state"], wstate)
@@ -247,7 +276,8 @@ def main():
             # 「初始化血统」（WTI 挂了 319 天）。起点统一后，只有 HYPE 这种
             # 上线不满 120 根的品种才真正有 init 段。色带仍从 START 开始画。
             s0 = 120
-            st, div, trig = daily_states(closes, s0, 70, 30, True, 2, True)
+            # 状态用判定序列（复权），价格图与背离标记仍用 closes（真实市价）。
+            st, div, trig = daily_states(jd, s0, 70, 30, True, 2, True)
             # daily_states 的第三个返回值是「稀疏触发点」，展开成逐日血统：
             # 某个区间的状态是「被哪类事件带进来的」，决定它有没有纠错通道。
             blood = []
@@ -326,6 +356,18 @@ def main():
                 summary.append({"key": a["key"], "label": a["label"], "group": a["group"],
                                 "unit": a.get("unit", ""), "weekly_state": None, "gate": "na",
                                 "regime": {"state": "N/A", "reason": str(e)}, "stale": False})
+
+    # 跨资产比较基准日 = 所有品种最后交易日的**最小值**。
+    # 各市场交易日历不同（加密 7×24、A 股有长假、美股有自己的假日），
+    # 同一页出现两个截止日很正常；但读者横向比较时不看日期，就会把「差一天」
+    # 当成「结构分化」。所以把公共基准日写在头上，而不是只写在每张卡片里。
+    _asofs = [s["regime"].get("as_of") for s in summary if s["regime"].get("as_of")]
+    as_of_common = min(_asofs) if _asofs else ""
+    as_of_latest = max(_asofs) if _asofs else ""
+    asof_note = ""
+    if as_of_common and as_of_latest and as_of_common != as_of_latest:
+        asof_note = (f"｜跨资产比较基准日 <b>{as_of_common}</b>"
+                     f"（最新已到 {as_of_latest}，各市场交易日历不同）")
 
     card_groups = {}
     for c in cards:
@@ -436,6 +478,7 @@ def main():
 <body><div class="wrap">
   <h1>市场趋势监控面板</h1>
   <p class="sub">生成时间：{run_at}（北京时间）｜监控 {n_total} 个品种｜红=上升 / 黄=震荡 / 绿=下降（国内配色）{block_note}{stale_note}</p>
+  <p class="sub" style="margin-top:-10px;">{asof_note}</p>
 
   {render_changes(changes, blocked)}
   {render_stats(summary)}
@@ -481,8 +524,25 @@ def main():
     当前周未收盘前不参与判定。日线与周线方向相反时标「日周反向」，<b>仅作状态描述</b>——
     把它当作「风险闸门」的假设已在 2021-2026 全 22 品种样本上验证并证伪：冲突格的前瞻收益
     没有显著劣势（20 日 p=0.59/0.75），闸门版策略仅跑赢 9/22 品种（=掷硬币），故不参与信号过滤。<br>
-    本面板为规则化市场状态分类，非投资建议。数据源：Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）/
-    腾讯行情（A 股指数，东方财富备源）。A 股按北京时间 15:00 判定当日是否已收盘，其余按 UTC 日线。
+    <b>数据口径（2026-11-25 修订）</b>：数据源 Hyperliquid（加密永续）/ Yahoo Finance（商品期货·ETF）/
+    腾讯行情（A 股指数，东方财富备源）。<br>
+    ① <b>收盘判定按各市场自己的时钟</b>，不再一律用 UTC 日期：A 股北京时间 15:00、美股 ETF 21:00Z、
+    CME 期货 22:00Z、加密 UTC 日界。早先统一用 UTC，构建若落在 21:00Z 之后，美股当天已收盘的 bar
+    会被当成「未收盘」丢掉，同一页出现「A 股截至 11-24、美股截至 11-23」的错位。<br>
+    ② <b>ETF 用复权价判定、原价展示</b>。分红在除息日造成一步式下跌，未复权序列因此带系统性下行漂移。
+    实测同一套状态机分别跑 close 与 adjclose，2024 年以来状态不同的交易日占比：HYG <b>60.7%</b>
+    （未复权判「下降」、复权判「上升」）、TLT 25.4%、IEF 25.8%、QQQ 8.1%、SPY 4.1%、
+    无分红的 GLD 0%。所以判定走复权、展示走市价；表里的 MA 已按复权因子还原回市价尺度，
+    可以直接和收盘价对比。商品期货与加密无分红，两者恒等。<br>
+    ③ <b>商品保留期货连续合约</b>（GC/SI/HG/CL/BZ），不换成对应 ETF。原因不是懒：实测同一资产
+    用期货与 ETF 跑出的状态只有 56~78% 一致（铜 77.7%、白银 57.8%），而两个无关资产（铜 vs 白银）
+    是 47.8%，且把 ETF 序列前移一日并不改善 —— 换过去只是换一个口径，还会丢掉
+    「黄金 3,500 美元/盎司」这种可读的参考价。<b>已知代价</b>：期货存在基差/换月事件，
+    2025-07-31 铜 HG=F 单日 -22.25% 而 CPER 只 -2.80%（COMEX 关税溢价崩塌），
+    这类日子会影响铜的趋势判定。不做自动抹平 —— 抹平会连带抹掉真实行情。<br>
+    ④ <b>跨资产比较请用页头的「比较基准日」</b>：各市场交易日历不同，最新日期不一致是正常的，
+    横向比较时统一截到公共基准日。<br>
+    本面板为规则化市场状态分类，非投资建议。
   </div>
 </div>
 <script>

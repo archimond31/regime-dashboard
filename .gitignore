@@ -286,3 +286,9 @@ holding_*.png
 # STRATEGY.html 的生成器：HTML 纳入版本管理，生成器也必须纳入，
 # 否则没人能复现那份 HTML（且 md → html 的样式改动会无法追溯）
 !_md2html.py
+
+# 数据口径 A/B（2026-11-25）：复权 vs 未复权、期货 vs ETF、换月跳空检验。
+# fetch_yahoo_daily / compute_regime 的注释都引用了它的结论，必须入库才能复现。
+!_ab_adjclose.py
+# 不入库：_res_bottom_report.md（回撤与加仓研究）。它包含个人财务处境描述，
+#   本仓库是 public，这类内容不应该进版本库。
