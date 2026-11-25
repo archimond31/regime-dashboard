@@ -73,10 +73,28 @@ ASSETS = [
     {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F", "unit": "美元/磅"},
     {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F", "unit": "美元/桶"},
     {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F", "unit": "美元/桶"},
-    # 宏观（Yahoo ETF）
-    {"key": "QQQ",  "label": "纳指 QQQ",      "group": "宏观", "source": "yahoo", "symbol": "QQQ", "unit": "美元"},
-    {"key": "SPY",  "label": "标普 SPY",      "group": "宏观", "source": "yahoo", "symbol": "SPY", "unit": "美元"},
-    {"key": "TLT",  "label": "美债 TLT",      "group": "宏观", "source": "yahoo", "symbol": "TLT", "unit": "美元"},
+    # ---- 2026-11-25 起按「定价链条」分组：外汇 → 利率 → 信用 → 权益 ----
+    # 原来的「宏观」组只有 QQQ/SPY/TLT 三个，既看不出美元这个定价锚，也看不出
+    # 信用利差和利率曲线形态。分组重排后每个组对应链条上的一环，
+    # 缺哪一环一眼可见（这一点比多塞几个山寨币有用得多）。
+    #
+    # 外汇：全球资产定价的锚。实测与黄金 -0.40、与标普 0.01，是独立维度最高的一个。
+    {"key": "DXY",  "label": "美元指数 DXY",  "group": "外汇", "source": "yahoo",
+     "symbol": "DX-Y.NYB", "unit": "点"},
+    # 利率：短/中/长三点才能看出曲线形态。只有 TLT（20Y+）时无法判断是「降息」
+    # 还是「陡峭化」。10Y-2Y 利差是衰退的经典信号。
+    {"key": "SHY",  "label": "短债 SHY 1-3Y", "group": "利率", "source": "yahoo",
+     "symbol": "SHY", "unit": "美元"},
+    {"key": "IEF",  "label": "中债 IEF 7-10Y","group": "利率", "source": "yahoo",
+     "symbol": "IEF", "unit": "美元"},
+    {"key": "TLT",  "label": "长债 TLT 20Y+", "group": "利率", "source": "yahoo",
+     "symbol": "TLT", "unit": "美元"},
+    # 信用：高收益债利差是风险偏好最灵敏的领先指标，通常先于股票转向。
+    {"key": "HYG",  "label": "高收益债 HYG",  "group": "信用", "source": "yahoo",
+     "symbol": "HYG", "unit": "美元"},
+    # 权益（美股）
+    {"key": "QQQ",  "label": "纳指 QQQ",      "group": "权益", "source": "yahoo", "symbol": "QQQ", "unit": "美元"},
+    {"key": "SPY",  "label": "标普 SPY",      "group": "权益", "source": "yahoo", "symbol": "SPY", "unit": "美元"},
     # A 股指数（腾讯行情为主源、东方财富为备源；指数无需复权；单位：点）
     {"key": "SH",     "label": "上证综指",  "group": "A股", "source": "ashare",
      "symbol": "sh000001", "em_secid": "1.000001", "unit": "点"},
@@ -86,9 +104,17 @@ ASSETS = [
      "symbol": "sz399006", "em_secid": "0.399006", "unit": "点"},
     {"key": "ZZ1000", "label": "中证1000",  "group": "A股", "source": "ashare",
      "symbol": "sh000852", "em_secid": "1.000852", "unit": "点"},
+    # 港股（Yahoo 指数）。与 A 股同属中国资产，但定价权在离岸、参与主体不同，
+    # 经常与 A 股背离 —— 单列一组比塞进「A股」更能看出这层分歧。
+    {"key": "HSI",    "label": "恒生指数",  "group": "港股", "source": "yahoo",
+     "symbol": "^HSI", "unit": "点"},
 ]
 
-GROUP_ORDER = ["加密", "商品", "宏观", "A股"]
+# 分组顺序 = 「定价链条」顺序，不是按品种数量。
+# 外汇（美元）是最上游的锚 → 利率 → 信用（风险偏好） → 权益 → 商品 → 加密（最下游、最高 beta）。
+# 加密放在最后是有意的：它 13 个品种只值 1.8 个有效独立维度（见 README / _ab_adjclose.py），
+# 占版面最多但信息最少，不该排在「看全球动向」的第一屏。
+GROUP_ORDER = ["外汇", "利率", "信用", "权益", "A股", "港股", "商品", "加密"]
 
 # A 股时区与收盘时刻：15:00（北京时间）之后当日 bar 才算完整
 CN_TZ = timezone(timedelta(hours=8))
@@ -203,6 +229,24 @@ def fetch_hyperliquid_daily(symbol):
 # 各市场「当日 bar 从几点（UTC）算完整」。见 drop_unclosed 的说明。
 US_CLOSE_HOUR_UTC = 21        # 16:00 ET；冬令时 21:00Z / 夏令时 20:00Z，取较晚者保守
 FUTURES_CLOSE_HOUR_UTC = 22   # CME Globex 日结算
+HK_CLOSE_HOUR_UTC = 8         # 港股 16:00 HKT
+HK_SYMBOLS = {"^HSI", "^HSCE"}
+
+
+def market_close_hour(a):
+    """该品种当日 bar 从几点（UTC）算完整。None = A 股（走北京时间 15:00 逻辑）。
+
+    只在这里判一次：面板和邮件都调它。之前两处各写一份 if/else，正是这类分支
+    最容易分叉的地方（加密/美股/期货/A股四种时钟，漏一种就是一天的静默错位）。
+    """
+    if a["source"] == "ashare":
+        return None
+    if a["source"] in ("binance", "hyperliquid"):
+        return 0
+    sym = a.get("symbol", "")
+    if sym in HK_SYMBOLS:
+        return HK_CLOSE_HOUR_UTC
+    return FUTURES_CLOSE_HOUR_UTC if sym.endswith("=F") else US_CLOSE_HOUR_UTC
 
 
 def drop_unclosed(rows, close_hour_utc=0):
@@ -579,15 +623,11 @@ def main():
             else:
                 rows = fetch_yahoo_daily(a["symbol"], warm_dt)
             # 各市场按自己的收盘时钟剔除未收盘 bar（A 股 15:00 北京、美股 21:00Z、
-            # 期货 22:00Z、加密 UTC 日界）。理由见 drop_unclosed。
+            # 港股 08:00Z、期货 22:00Z、加密 UTC 日界）。理由见 drop_unclosed。
             if a["source"] == "ashare":
                 rows = drop_unclosed_cn(rows)
-            elif a["source"] in ("binance", "hyperliquid"):
-                rows = drop_unclosed(rows, 0)
             else:
-                rows = drop_unclosed(
-                    rows, FUTURES_CLOSE_HOUR_UTC if a["symbol"].endswith("=F")
-                    else US_CLOSE_HOUR_UTC)
+                rows = drop_unclosed(rows, market_close_hour(a) or 0)
             closes = [r["close"] for r in rows]
             dates = [r["date"] for r in rows]
             # 判定走复权（ETF 有分红漂移），展示走市价 —— 与面板同一口径，

@@ -33,8 +33,7 @@ from daily_regime_alert import (
     compute_regime, compute_regime_weekly,
     resonance_gate, GATE_CN, trig_cn,
     STATE_CN, STATE_COLOR, TRIGGER_CN, fmt_price, WARM_START, START,
-    drop_unclosed, drop_unclosed_cn,
-    US_CLOSE_HOUR_UTC, FUTURES_CLOSE_HOUR_UTC,
+    drop_unclosed, drop_unclosed_cn, market_close_hour,
 )
 
 MIN_DAYS = 3
@@ -91,27 +90,15 @@ def fetch_asset(a, warm_dt):
     return fetch_yahoo_daily(a["symbol"], warm_dt)
 
 
-def close_hour_of(a):
-    """该品种所在市场的收盘时刻（UTC 小时）。0 = 加密 UTC 日界。
-
-    A 股不用这个（走 drop_unclosed_cn 的北京时间 15:00 逻辑），返回 None。
-    商品用 22（CME Globex 日结算），美股 ETF 用 21（16:00 ET）。
-    """
-    if a["source"] == "ashare":
-        return None
-    if a["source"] in ("binance", "hyperliquid"):
-        return 0
-    return FUTURES_CLOSE_HOUR_UTC if a["symbol"].endswith("=F") else US_CLOSE_HOUR_UTC
-
-
 def trim_unclosed(a, rows):
     """按各市场自己的收盘规则剔除未收盘 bar。
 
     不能用统一的 `date < today(UTC)`：构建落在 21:00Z 之后时，美股当天已收盘的
-    bar 会被误删，页面于是出现「A 股截至 11-24、美股/商品截至 11-23」的错位。"""
+    bar 会被误删，页面于是出现「A 股截至 11-24、美股/商品截至 11-23」的错位。
+    时钟判据只有一份（daily_regime_alert.market_close_hour），面板与邮件共用。"""
     if a["source"] == "ashare":
         return drop_unclosed_cn(rows)
-    return drop_unclosed(rows, close_hour_utc=close_hour_of(a) or 0)
+    return drop_unclosed(rows, market_close_hour(a) or 0)
 
 
 def judge_series(rows):
@@ -419,6 +406,12 @@ def main():
     # 本地跑反而看不出问题（本机就是东八区，naive now 恰好等于北京时间）。
     run_at = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
     n_total = len(ASSETS)
+    # 页脚 ⑤ 的分组顺序与加密品种数都从 ASSETS 现算，不手写 —— 手写的那版
+    # 在加完 A股/港股两组之后仍然只列到「商品 → 加密」，代码与说明就此分叉。
+    group_chain = " → ".join(
+        g if g != "外汇" else "外汇（美元）" for g in GROUP_ORDER if g in
+        {a["group"] for a in ASSETS})
+    n_crypto = sum(1 for a in ASSETS if a["source"] in ("binance", "hyperliquid"))
     n_stale = sum(1 for s in summary if s.get("stale"))
     n_block = sum(1 for s in summary if s.get("gate") == "block")
     stale_note = (f"｜<span style='color:#c00;'>{n_stale} 个品种沿用旧数据</span>"
@@ -542,6 +535,15 @@ def main():
     这类日子会影响铜的趋势判定。不做自动抹平 —— 抹平会连带抹掉真实行情。<br>
     ④ <b>跨资产比较请用页头的「比较基准日」</b>：各市场交易日历不同，最新日期不一致是正常的，
     横向比较时统一截到公共基准日。<br>
+    ⑤ <b>分组按「定价链条」排</b>：{group_chain}。
+    2026-11-25 新增美元指数、短/中债、高收益债、恒生指数共 5 个品种（25→30）。
+    <b>为什么加这几个而不是再加加密币</b>：8 币样本上实测两两日收益平均相关 0.69，
+    按相关矩阵特征值 (Σλ)²/Σλ² 折算只值 <b>1.81</b> 个有效独立维度（每加一个只多 0.12，
+    按此斜率 {n_crypto} 个约 2.4），而加美元/标普/黄金/信用这 4 类能换来 <b>+1.40</b>。
+    加密 {n_crypto} 个品种占了近一半版面、独立信息最少，所以移到最后一组。<br>
+    <b>仍未覆盖（下一阶段）</b>：新兴市场 EEM、日本 EWJ、欧洲 VGK、农产品（玉米/大豆）、
+    天然气 NG、铂金 PL、投资级信用 LQD、美元兑日元。VIX 刻意没加 —— 它与标普相关 -0.82，
+    跑同一套趋势机等于把标普反着画一遍，应当做分位数仪表而不是第 31 行状态。
     本面板为规则化市场状态分类，非投资建议。
   </div>
 </div>
