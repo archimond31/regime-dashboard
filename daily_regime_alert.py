@@ -73,6 +73,12 @@ ASSETS = [
     {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F", "unit": "美元/磅"},
     {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F", "unit": "美元/桶"},
     {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F", "unit": "美元/桶"},
+    # 天然气与铂金：原油/铜/金银都覆盖不到的两类供需。
+    # 天然气是**区域性商品**（HH 价格由美国本土库存与天气决定，与油价脱钩），
+    # 因此它给的是一条独立的价格信号，不是原油的重复项；
+    # 铂金一半需求在汽车催化剂、一半在工业与首饰，与黄金的避险属性不同源。
+    {"key": "NG",   "label": "天然气 NG",     "group": "商品", "source": "yahoo", "symbol": "NG=F", "unit": "美元/MMBtu"},
+    {"key": "PL",   "label": "铂金 PL",       "group": "商品", "source": "yahoo", "symbol": "PL=F", "unit": "美元/盎司"},
     # ---- 2026-11-25 起按「定价链条」分组：外汇 → 利率 → 信用 → 权益 ----
     # 原来的「宏观」组只有 QQQ/SPY/TLT 三个，既看不出美元这个定价锚，也看不出
     # 信用利差和利率曲线形态。分组重排后每个组对应链条上的一环，
@@ -81,6 +87,12 @@ ASSETS = [
     # 外汇：全球资产定价的锚。实测与黄金 -0.40、与标普 0.01，是独立维度最高的一个。
     {"key": "DXY",  "label": "美元指数 DXY",  "group": "外汇", "source": "yahoo",
      "symbol": "DX-Y.NYB", "unit": "点"},
+    # 美元兑日元：美元的另一条腿。DXY 里日元权重约 13.6%，但日元是**全球套息交易的
+    # 融资货币** —— 风险偏好收缩时套息平仓，日元涨、USDJPY 跌，这个动作往往比 DXY
+    # 先发生。同时它是「避险」和「美元强」这两个常被混为一谈的东西的分辨器：
+    # 避险买美元 → DXY 涨、USDJPY 也涨；套息平仓 → 美元对欧元涨、对日元跌。
+    {"key": "USDJPY", "label": "美元兑日元",  "group": "外汇", "source": "yahoo",
+     "symbol": "USDJPY=X", "unit": "日元"},
     # 利率：短/中/长三点才能看出曲线形态。只有 TLT（20Y+）时无法判断是「降息」
     # 还是「陡峭化」。10Y-2Y 利差是衰退的经典信号。
     {"key": "SHY",  "label": "短债 SHY 1-3Y", "group": "利率", "source": "yahoo",
@@ -92,9 +104,20 @@ ASSETS = [
     # 信用：高收益债利差是风险偏好最灵敏的领先指标，通常先于股票转向。
     {"key": "HYG",  "label": "高收益债 HYG",  "group": "信用", "source": "yahoo",
      "symbol": "HYG", "unit": "美元"},
-    # 权益（美股）
+    # 投资级信用。单看 HYG 只能知道「信用好不好」，加上 LQD 才能知道**好的是哪一层**：
+    # HYG 涨/LQD 平 = 风险偏好下沉到垃圾债（牛市后期特征）；
+    # 两者同跌 = 无差别去杠杆。这一组的两个品种要一起读，不能各读各的。
+    {"key": "LQD",  "label": "投资级债 LQD",  "group": "信用", "source": "yahoo",
+     "symbol": "LQD", "unit": "美元"},
+    # 权益（美股 → 非美，组内按「核心 → 外围」排）
+    # 只有 QQQ/SPY 时看到的是「美国大盘」，而 2024-2026 的行情主线之一恰恰是
+    # 美股与非美的分化。三个非美 ETF 都是美国上市、美元计价、同一时钟（16:00 ET），
+    # 与 QQQ/SPY 横向可比，不受汇率折算口径干扰。
     {"key": "QQQ",  "label": "纳指 QQQ",      "group": "权益", "source": "yahoo", "symbol": "QQQ", "unit": "美元"},
     {"key": "SPY",  "label": "标普 SPY",      "group": "权益", "source": "yahoo", "symbol": "SPY", "unit": "美元"},
+    {"key": "EEM",  "label": "新兴市场 EEM",  "group": "权益", "source": "yahoo", "symbol": "EEM", "unit": "美元"},
+    {"key": "EWJ",  "label": "日本 EWJ",      "group": "权益", "source": "yahoo", "symbol": "EWJ", "unit": "美元"},
+    {"key": "VGK",  "label": "欧洲 VGK",      "group": "权益", "source": "yahoo", "symbol": "VGK", "unit": "美元"},
     # A 股指数（腾讯行情为主源、东方财富为备源；指数无需复权；单位：点）
     {"key": "SH",     "label": "上证综指",  "group": "A股", "source": "ashare",
      "symbol": "sh000001", "em_secid": "1.000001", "unit": "点"},
@@ -237,7 +260,7 @@ def market_close_hour(a):
     """该品种当日 bar 从几点（UTC）算完整。None = A 股（走北京时间 15:00 逻辑）。
 
     只在这里判一次：面板和邮件都调它。之前两处各写一份 if/else，正是这类分支
-    最容易分叉的地方（加密/美股/期货/A股四种时钟，漏一种就是一天的静默错位）。
+    最容易分叉的地方（加密/美股/期货/港股/汇率/A股五种时钟，漏一种就是一天的静默错位）。
     """
     if a["source"] == "ashare":
         return None
@@ -246,6 +269,15 @@ def market_close_hour(a):
     sym = a.get("symbol", "")
     if sym in HK_SYMBOLS:
         return HK_CLOSE_HOUR_UTC
+    # 汇率（Yahoo `=X` 后缀）走 UTC 日界，和加密同理：它 24 小时连续交易，
+    # 「今天」那根 bar 从 00:00Z 就开始滚动。2026-11-25 09:18Z 实测 USDJPY=X 已经
+    # 返回当天 159.362 的值，说明那是**只走了 39% 的一天**。若套用美股的 21Z，
+    # 这根不完整的 bar 会被当成已收盘喂给状态机 —— 而汇率恰恰是波动最小、
+    # RSI 最容易在阈值附近来回穿的那一类，一根差 60 个点的半成品 bar 足以凭空
+    # 造出一次穿越。代价是汇率永远比 A 股/港股晚一天（UTC 日要到次日 00:00Z 才收），
+    # 但 DXY 也是 21Z，两者同日，组内至少自洽。
+    if sym.endswith("=X"):
+        return 0
     return FUTURES_CLOSE_HOUR_UTC if sym.endswith("=F") else US_CLOSE_HOUR_UTC
 
 
@@ -253,7 +285,8 @@ def drop_unclosed(rows, close_hour_utc=0):
     """剔除未收盘日线。
 
     close_hour_utc：该市场「当日 bar 从几点（UTC）起算完整」。
-      0  = 加密 / 24×7（UTC 日界，date d 的 bar 在 d+1 00:00Z 收）
+      0  = 加密 / 24×7 / 汇率（UTC 日界，date d 的 bar 在 d+1 00:00Z 收）
+      8  = 港股
       21 = 美股 / 美股 ETF
       22 = CME 期货
 
