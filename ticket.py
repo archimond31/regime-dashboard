@@ -191,6 +191,25 @@ def new_item(o, bar):
     }
 
 
+def _held_from_ledger(items):
+    """手上真实持有的现货金额（U），**不做任何收敛**。
+
+    与 live_signals.spot_held 的唯一差别：那里用 `min(快照, 当前目标)` 收窄，
+    本意是防「5000 本金时代的旧快照高估」。但那件事的前提是**那张单没被执行**；
+    一旦 status=done，金额就是既成事实，再收窄等于改账本 —— 而且会同时掩盖超配：
+    2026-11-26 AAVE 真实持有 167 U、目标 71 U，页面显示 71 U，96 U 的超配凭空消失。
+    真值只在显示层收窄是合理的（防误读），在决策层收窄不是。
+    """
+    held = {}
+    for i in items:
+        if i.get("kind") not in ("建底仓", "清底仓") or i.get("status") != "done":
+            continue
+        amt = abs(i.get("notional") or 0)
+        sgn = 1 if i["kind"] == "建底仓" else -1
+        held[i["coin"]] = held.get(i["coin"], 0.0) + sgn * amt
+    return {k: v for k, v in held.items() if v > 0}
+
+
 def sync(sig=None):
     """按 _signal.json 同步一次：开新单、作废失效单、刷新年龄。"""
     if sig is None:
@@ -219,16 +238,34 @@ def sync(sig=None):
     # 只按事件的话会漏 —— _base_clear.json 提示过一次就不再报，等你哪天打开页面
     # 才发现「日线 UP 两个月了，底仓一直是空的」。清底仓反过来只能按事件，
     # 因为 DOWN 状态下底仓本来就该是 0，从状态里推不出「还没清」。
+    #
+    # **但这条兜底必须查持有量。** 它原来的判据是「台账里有没有这个 key」，
+    # 而 key 带 regime_start —— 状态段一变就是新 key，哪怕手上早就买满了。
+    # 2026-11-26 AAVE：11-22 按 5000 本金买过 167 U（id=8 done），11-26 翻 UP 后
+    # 目标是 71 U，live_signals 算出差额 −96、**主动放弃发单**（action=空仓），
+    # 这里却按新 key 又开了一张 71 U 的全额单（id=19）。两层各判一遍就是这个结果：
+    # live_signals 说「别买」，ticket 说「买」，而工单备注里连金额都不写，
+    # 人根本看不出它和自己手里的持仓是矛盾的。执行后 238 U，是峰值的 2.2 倍。
+    held_raw = _held_from_ledger(items)
     for o in sig["coins"]:
         if o.get("pos") is not None or o.get("triggered"):
             continue                       # 有 4H 仓 / 已触发 → 走开仓单，不单列底仓
         if o.get("state") not in ("UP", "RANGE"):
             continue
+        tgt = float(o.get("target") or 0)
+        if tgt <= 0:
+            continue                       # 这一段不要底仓（来路 DOWN 且系数 0）
+        real = held_raw.get(o["c"], 0.0)
+        if real >= tgt - PC.min_order_value(o["c"]):
+            continue                       # 已持有达到目标或超配 → 不该再买
         k = f'{o["c"]}|建底仓|{o.get("regime_start") or bar}'
         if k not in live:
-            live[k] = dict(o, action="建底仓",
+            delta = round(tgt - real)
+            tail = (f'已持有 {round(real)} U，本单补 {delta} U' if real > 0
+                    else f'底仓 {round(tgt)} U 应在场')
+            live[k] = dict(o, action="建底仓", target=delta,
                            note=f'日线 {o.get("regime_start") or bar} 起为 {o["state"]}，'
-                                f'底仓应在场（4H 突破后再加到峰值）；'
+                                f'{tail}（4H 突破后再加到峰值）；'
                                 f'退出：日线翻 DOWN 即清底仓，现货无价格止损')
 
     opened = 0

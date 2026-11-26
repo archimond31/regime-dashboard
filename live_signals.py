@@ -395,16 +395,20 @@ def spot_held(cur_tgt=None):
       · 该币只有未结算的建底仓 → 按该单金额算持有（人已经买了，只是没回来标记）；
       · 从没建过 → 0（不出现在返回里）。
 
-    cur_tgt：{币: 当前信号 target}。台账里的 notional 是**建单时**的快照，
-    5000 本金时代建的单（HYPE 477）与现在该买的（200）差 2.4 倍；
-    拿旧快照当「持有量」会高估。有现口径就取 min(快照, 现口径)。
+    cur_tgt：**已废弃，仅为兼容调用方保留。** 它原来用来把快照收窄到
+    `min(快照, 当前目标)`，本意是防「5000 本金时代的旧快照高估」。但那个前提是
+    **那张单没被执行**；一旦 status=done，买入金额就是既成事实，再拿目标去收窄
+    等于改账本。2026-11-26 的实测代价：AAVE 真实持有 167 U、目标 71 U，
+    被收窄成 71 之后页面写「持有 71 / 该持有 71 / 差额 —」，
+    **96 U 的超配完全不可见**；同一天 HYPE 少报 277、ZEC 少报 197、UNI 少报 157，
+    合计少报 727 U（账户 2000 U 的 36%），页面写 50% 敞口、真实 87%。
+    现在一律返回真值，超配交给显示层去标（gen_signal_html 的「差额」列会显示待卖）。
 
     只有一个用途：**决定要不要提示「清底仓」，以及该清多少**。
     没有它，纯现货模式下 BTC/ETH/BNB/DOGE/NEAR 这 5 个日线 DOWN 的币
     每轮都会生成「卖出 358 / 261 / 301 / 239 / 108 U」——
     而账户里根本没有这些货。这类「卖出不存在的东西」的指令比漏提示更伤人。
     """
-    cur_tgt = cur_tgt or {}
     held = {}
     try:
         with open(TICKETS, encoding="utf-8") as f:
@@ -416,10 +420,6 @@ def spot_held(cur_tgt=None):
         if not k or i.get("kind") not in ("建底仓", "清底仓"):
             continue
         amt = abs(i.get("notional") or 0)
-        if i.get("kind") == "建底仓":
-            t = cur_tgt.get(k)
-            if t is not None and t > 0:
-                amt = min(amt, t)        # 旧快照高估时按现口径收窄
         sgn = 1 if i.get("kind") == "建底仓" else -1
         if i.get("status") == "done":
             held[k] = held.get(k, 0.0) + sgn * amt
