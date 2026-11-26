@@ -384,7 +384,7 @@ def _save_gate(d):
 TICKETS = "_tickets.json"
 
 
-def spot_held(cur_tgt=None):
+def spot_held(cur_tgt=None, pending=True):
     """各币「手上真实持有的现货底仓」金额（U）—— 从工单台账推，不另建一份持仓账。
 
     为什么不新建一份：多一份账就多一个会失同步的地方。台账已经记了每张
@@ -392,24 +392,29 @@ def spot_held(cur_tgt=None):
 
     口径：
       · 已结算(done)的建底仓 − 已结算(done)的清底仓；
-      · 该币只有未结算的建底仓 → 按该单金额算持有（人已经买了，只是没回来标记）；
+      · 金额优先取 `fill_notional`（实际成交额），没有才退回 `notional`（建单建议额）；
+      · 该币只有未结算的建底仓 → 看 pending 参数（见下）；
       · 从没建过 → 0（不出现在返回里）。
 
-    cur_tgt：**已废弃，仅为兼容调用方保留。** 它原来用来把快照收窄到
-    `min(快照, 当前目标)`，本意是防「5000 本金时代的旧快照高估」。但那个前提是
-    **那张单没被执行**；一旦 status=done，买入金额就是既成事实，再拿目标去收窄
-    等于改账本。2026-11-26 的实测代价：AAVE 真实持有 167 U、目标 71 U，
-    被收窄成 71 之后页面写「持有 71 / 该持有 71 / 差额 —」，
-    **96 U 的超配完全不可见**；同一天 HYPE 少报 277、ZEC 少报 197、UNI 少报 157，
-    合计少报 727 U（账户 2000 U 的 36%），页面写 50% 敞口、真实 87%。
-    现在一律返回真值，超配交给显示层去标（gen_signal_html 的「差额」列会显示待卖）。
+    cur_tgt：**已废弃，仅为兼容调用方保留。**
+    它原来把持有量收窄到 `min(快照, 当前目标)`，本意是防「5000 本金时代的旧快照高估」。
+    在「人按新本金口径折算后买入」的情形下，这个收窄**碰巧给出正确答案**；
+    但那是猜对，不是记对 —— 一旦实际成交额与当前目标不相等（加仓、
+    部分成交、或按别的口径下单），它就会给出一个看起来精确、其实凭空捏造的持仓。
+    2026-11-26 的教训：同一批工单，按面值读是 1,731 U、按 2000 口径读是 1,004 U，
+    两种读法算出的敞口差 36 个百分点，而页面在两种情形下都显示得很自信。
+    → 现在只认台账里的**事实字段**（fill_notional / notional），不再用目标去裁剪。
 
-    只有一个用途：**决定要不要提示「清底仓」，以及该清多少**。
-    没有它，纯现货模式下 BTC/ETH/BNB/DOGE/NEAR 这 5 个日线 DOWN 的币
-    每轮都会生成「卖出 358 / 261 / 301 / 239 / 108 U」——
-    而账户里根本没有这些货。这类「卖出不存在的东西」的指令比漏提示更伤人。
+    pending：是否把「未结算的建底仓」也算作持有。
+      True （默认）→ 用于**要不要提示清底仓**：宁可多提示，也不要因为「买了他没
+                      标记」而漏掉一次该有的清仓提示。多提示的代价是看一眼，漏提示
+                      的代价是裸仓过夜。
+      False        → 用于**页面展示**：`open` 工单只是待办，不是持仓。
+                      把它算进「持有」会让「已持有」和「该持有」永远看起来平衡，
+                      从而掩盖「这一笔其实还没下」。
     """
     held = {}
+    est = set()
     try:
         with open(TICKETS, encoding="utf-8") as f:
             d = json.load(f)
@@ -419,13 +424,49 @@ def spot_held(cur_tgt=None):
         k = i.get("coin")
         if not k or i.get("kind") not in ("建底仓", "清底仓"):
             continue
-        amt = abs(i.get("notional") or 0)
+        # 先按状态过滤，再算金额。顺序反了会把 void/drop 的旧单也算进「推定」——
+        # XRP 有一张 void 的 560 U 建仓单，它一旦参与计算，XRP 就会被误标「推定」，
+        # 而 XRP 其实有一张金额完全对得上的 done 单（254 = 254）。
+        status = i.get("status")
+        if status not in ("done", "open"):
+            continue
+        # 金额优先级：实际成交额 > 建单建议额（收窄到当前目标，并标为**推定**）。
+        #
+        # 为什么建议额要收窄并标记：`notional` 是建单那一刻的建议值，会随本金口径
+        # （5000→2000）与波动率目标化漂移。人真实下单的金额与它并不总相等 ——
+        # 2026-11-26 AAVE 建单建议 167（5000 口径），实际按 2000 本金口径买了 71。
+        # 没有成交记录时，只能拿 `min(建议额, 当前目标)` 去逼近，但这**是推定不是事实**，
+        # 所以单独记进 est，页面必须标出来 —— 一个看起来精确的假数字，
+        # 比一个明确标注的估计值危险得多。
+        fn = i.get("fill_notional")
+        if fn is not None:
+            amt = abs(float(fn))
+        else:
+            amt = abs(i.get("notional") or 0)
+            t = cur_tgt.get(k)
+            # 只在「建议额明显高于当前目标」时才收窄并标记。差额不到 5%、也不到 20 U
+            # 的属于取整噪声（VT 系数或权重微调），既不该改数，也不该打推定标 ——
+            # 把 1 U 的差都标成「推定」，等于让标记失去信息量。
+            if t is not None and t > 0 and amt - t > max(20.0, 0.05 * amt):
+                amt = t
+                est.add(k)
         sgn = 1 if i.get("kind") == "建底仓" else -1
         if i.get("status") == "done":
             held[k] = held.get(k, 0.0) + sgn * amt
-        elif i.get("status") == "open" and sgn > 0:
+        elif pending and i.get("status") == "open" and sgn > 0:
             held[k] = max(held.get(k, 0.0), amt)
+    _EST.clear()
+    _EST.update({k for k in est if k in held})
     return {k: v for k, v in held.items() if v > 0}
+
+
+# 上一次 spot_held 里「金额是推定而非成交记录」的币。页面据此打标，
+# 让人一眼看出哪个数字经不起追问。
+_EST = set()
+
+
+def spot_estimated():
+    return set(_EST)
 
 
 def short_opened():
@@ -592,8 +633,14 @@ def main():
            "asof_bj": (now + dt.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
            "bar4h": bar, "capital": PC.CAPITAL, "allow_short": PC.ALLOW_SHORT,
            "execute_short": PC.EXECUTE_SHORT, "mode": _mode,
-           # 手上真实持有的现货底仓（从工单台账推），给 hold 页与邮件做「有货才提示卖」
-           "spot_held": {k: round(v) for k, v in held.items()},
+           # 手上真实持有的现货底仓（从工单台账推），给 hold 页与邮件做「有货才提示卖」。
+           # pending=False：页面上的「持有」必须是**已经买了的**，不能把还没执行的
+           # open 工单算进去 —— 那会让「该持有/差额」自我平衡，把「这一笔还没下」藏起来。
+           # spot_est：这几行的金额没有成交记录、是按当前目标收窄推出来的，页面要标「推定」。
+           "spot_held": {k: round(v) for k, v in
+                         spot_held({o["c"]: o.get("target") for o in rows},
+                                   pending=False).items()},
+           "spot_est": sorted(spot_estimated()),
            # 生效配置留痕：三个月后回看「当时到底开没开」不用翻代码
            "vt": {"on": VT.ENABLED, "lb": VT.LB, "target": VT.TARGET,
                   "lo": VT.LO, "hi": VT.HI, "kappa": VT.KAPPA,

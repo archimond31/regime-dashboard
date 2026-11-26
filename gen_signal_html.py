@@ -171,6 +171,9 @@ else:
 # 上半部分（当前持仓）只讲 4H 永续仓。纯现货账户里那一栏永远是空的，
 # 而真实的钱全在现货底仓上 —— 不把它单独列出来，"持仓 0/12" 就是在说谎。
 _SPOT = d.get("spot_held") or {}
+# 金额是「按当前目标收窄推出来的」而不是成交记录：这几行必须标「推定」。
+# 不标的话，一个看起来精确的假数字比一个明确标注的估计值危险得多。
+_EST = set(d.get("spot_est") or [])
 if _SPOT:
     _srows = ""
     _ssum = 0.0
@@ -185,7 +188,12 @@ if _SPOT:
         dtxt = ("—" if abs(diff) < max(20, 0.1 * v)
                 else (f"{diff:+,.0f} 待{'买' if diff > 0 else '卖'}"))
         _srows += (
-            f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD}"><b>{o["c"]}</b></td>'
+            f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD}"><b>{o["c"]}</b>'
+            + (f'<span style="font-size:10px;color:{MU};border:1px solid {BD};'
+               f'border-radius:3px;padding:0 3px;margin-left:4px" '
+               f'title="台账里没有该单的实际成交额，此数按「建单建议额收窄到当前目标」推定">'
+               f'推定</span>' if o["c"] in _EST else "")
+            + f'</td>'
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};color:'
             f'{state_color(o["state"])}">{o["state"]}</td>'
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right">{v:,.0f} U</td>'
@@ -206,12 +214,13 @@ if _SPOT:
                                 ("该持有", "right"), ("差额", "right"), ("说明", "left")])
         + f'</tr>{_srows}</table>'
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
-        f'「持有」由工单台账推（已结算的建底仓 − 清底仓，含未结算的建仓单）。'
+        f'「持有」由工单台账推（已结算的建底仓 − 清底仓）。'
         f'现货底仓没有价格止损，唯一退出通道是「日线翻 DOWN → 清底仓」。'
+        f'<br>带 <b>推定</b> 标记的行：台账里没有该单的实际成交额，'
+        f'数字是把建单建议额收窄到当前目标推出来的 —— 它是估计，不是成交记录。'
+        f'下单后执行 <code>ticket.py fill &lt;编号&gt; &lt;成交额U&gt;</code> 补录，标记即消失。'
         f'<br><b>「差额」为负 = 超配</b>：底仓只在「日线翻 DOWN」或「RANGE 系数为 0」时'
         f'才自动清，<b>策略不会为超配生成减仓工单</b> —— 这几种差额要按目标手动减。'
-        f'超配的典型来源是本金口径变更（5000 → 2000）或波动率目标化把目标压低，'
-        f'两种情况下旧仓都不会自己缩。'
         + (f'<br><b>两个净敞口不要混用</b>：策略书 '
            f'{sum(o.get("target") or 0 for o in COINS) / (_CAP or 1):+.2f}×'
            f'（含未建仓空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'

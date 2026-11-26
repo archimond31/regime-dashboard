@@ -183,6 +183,13 @@ def new_item(o, bar):
         "status": "open",
         "settled_at": None,
         "fill_px": None,
+        # 实际成交金额（U）。**与 notional 不是一回事**：notional 是建单那一刻的
+        # 建议金额，会随本金口径（5000→2000）和波动率目标化漂移；人真正下单的
+        # 金额可能不等于它（常见情形：按新本金口径折算后买入）。
+        # 没有这个字段时，系统只能靠 min(notional, 当前目标) 去**猜**真实持仓，
+        # 猜对了页面就对、猜错了就系统性偏差 —— 2026-11-26 AAVE 那次两种解释
+        # （167 还是 71）算出来的敞口差 36 个百分点。金额必须记事实，不能靠推断。
+        "fill_notional": None,
         "void_note": None,
         # 「这单通知过没有」必须记在单子上，不能记在全局的 last.opened 里 ——
         # 那个字段每次 sync 都被覆盖，一旦某次没发出去（当天额度已用、SMTP 失败、
@@ -194,17 +201,24 @@ def new_item(o, bar):
 def _held_from_ledger(items):
     """手上真实持有的现货金额（U），**不做任何收敛**。
 
-    与 live_signals.spot_held 的唯一差别：那里用 `min(快照, 当前目标)` 收窄，
-    本意是防「5000 本金时代的旧快照高估」。但那件事的前提是**那张单没被执行**；
-    一旦 status=done，金额就是既成事实，再收窄等于改账本 —— 而且会同时掩盖超配：
-    2026-11-26 AAVE 真实持有 167 U、目标 71 U，页面显示 71 U，96 U 的超配凭空消失。
-    真值只在显示层收窄是合理的（防误读），在决策层收窄不是。
+    金额优先取 `fill_notional`（实际成交额），没有才退回 `notional`（建单建议额）。
+    这里不拿「当前目标」去收窄 —— 收窄属于显示层的推定，不属于决策层的账本；
+    决策层一旦收窄，就再也分不清「我有这么多」和「我该有这么多」。
+
+    2026-11-26 的教训（第一版结论是错的，这里是修正后的版本）：
+    AAVE 建单建议 167 U（5000 本金口径），人实际按 2000 口径买了 71 U。
+    我最初把 `done` 当成「按面值成交」，据此算出全表超配 727 U、真实敞口 87% —— 
+    **那是错的**。账面 1,004 U 才是对的。
+    正确的修法不是「去掉收窄让数字变大」，而是**把成交额记下来**（fill_notional）。
+    没有事实字段时用推定、并且明确标记，是可接受的；用推定冒充事实不行。
     """
     held = {}
     for i in items:
         if i.get("kind") not in ("建底仓", "清底仓") or i.get("status") != "done":
             continue
-        amt = abs(i.get("notional") or 0)
+        # 优先用实际成交额；没有则退回建单时的建议额。
+        amt = i.get("fill_notional")
+        amt = abs(float(amt)) if amt is not None else abs(i.get("notional") or 0)
         sgn = 1 if i["kind"] == "建底仓" else -1
         held[i["coin"]] = held.get(i["coin"], 0.0) + sgn * amt
     return {k: v for k, v in held.items() if v > 0}
@@ -332,7 +346,7 @@ def _open_items(d):
     return [i for i in d["items"] if i["status"] == "open"]
 
 
-def mark(ids, status, fill_px=None):
+def mark(ids, status, fill_px=None, fill_notional=None):
     d = load()
     hit = 0
     for i in d["items"]:
@@ -344,6 +358,8 @@ def mark(ids, status, fill_px=None):
         i["settled_at"] = dt.datetime.now(dt.timezone.utc).strftime(BAR_FMT) + " UTC"
         if fill_px is not None:
             i["fill_px"] = fill_px
+        if fill_notional is not None:
+            i["fill_notional"] = abs(float(fill_notional))
         hit += 1
         print(f"  #{i['id']} {i['coin']:<5} {LAB.get(i['kind'], i['kind']):<12} → {status}")
     if not hit:
@@ -703,6 +719,30 @@ def _void_reasons(items):
         print(f"  {k:<20}{v:>4} 张（{v / len(vs) * 100:.0f}%）")
 
 
+def set_fill(ids, amount, px=None):
+    """给**已结算**的工单补录实际成交额（U）。
+
+    为什么不复用 mark：mark 只动 open 的，而这里要修的恰恰是历史上已经标了
+    done、但金额是「建单建议额」而非「真实成交额」的那批。典型来源是本金口径
+    变更（5000→2000）：工单面值 167，人实际只买了 71，标 done 时却没记金额。
+    """
+    d = load()
+    hit = 0
+    for i in d["items"]:
+        if i["id"] not in ids:
+            continue
+        i["fill_notional"] = abs(float(amount))
+        if px is not None:
+            i["fill_px"] = float(px)
+        hit += 1
+        print(f"  #{i['id']} {i['coin']:<5} {LAB.get(i['kind'], i['kind']):<12} "
+              f"成交额 {i['notional']} → {i['fill_notional']:,.0f} U")
+    if not hit:
+        print("  没有匹配的工单。")
+    save(d)
+    return hit
+
+
 def main():
     argv = sys.argv[1:]
     if not argv:
@@ -715,6 +755,15 @@ def main():
         return 0
     if cmd == "stats":
         return cmd_stats()
+    if cmd == "fill":
+        # 补录实际成交额：fill <编号> <成交额U> [成交价]
+        if len(rest) < 2:
+            print("用法：fill <编号> <成交额U> [成交价]")
+            return 1
+        ids = {int(x) for x in rest[0].split(",")}
+        px = float(rest[2]) if len(rest) > 2 else None
+        set_fill(ids, float(rest[1]), px)
+        return 0
     if cmd == "list":
         d = load()
         op = _open_items(d)
@@ -734,15 +783,17 @@ def main():
         return 0
     if cmd in ("done", "drop"):
         if not rest:
-            print(f"用法：{cmd} <编号|all> [成交价]")
+            print(f"用法：{cmd} <编号|all> [成交价] [成交额U]")
             return 1
         if rest[0] == "all":
             ids = "all"
             fp = float(rest[1]) if len(rest) > 1 else None
+            fn = float(rest[2]) if len(rest) > 2 else None
         else:
             ids = {int(x) for x in rest[0].split(",")}
             fp = float(rest[1]) if len(rest) > 1 else None
-        mark(ids, "done" if cmd == "done" else "drop", fp)
+            fn = float(rest[2]) if len(rest) > 2 else None
+        mark(ids, "done" if cmd == "done" else "drop", fp, fn)
         return 0
     print(__doc__)
     return 0
