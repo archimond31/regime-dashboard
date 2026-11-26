@@ -20,7 +20,8 @@
     B_fix   年度再平衡 + 权重恒按 50 万算  ← 只差「权重是否随净值变」
     B_q     季度再平衡 + 权重恒按 50 万算  ← 对照，应与现有口径 C 复现
 
-自检：B_q 的结果必须接近 _report_latest.py 输出的口径 C（约 28×/−54.9%）。
+自检：B_q 的结果必须接近 _report_latest.py 输出的口径 C（11 币约 25.1×/−54.6%，
+      12 币时代是 28.0×/−54.9%）。改币种组合后这个对照值必须同步改。
       对不上说明本脚本的组合层写错了，不能相信 B_full。
 
 用法：python _exp_cum_b.py
@@ -44,8 +45,11 @@ from test_regime_fit import agg4h
 CAP = 500_000
 F4 = BT.FUND_DAILY / 6.0
 START_NAV = "2020-09-01"
+# 2026-11-27 去 DOGE：12 币改为 11 币。**自检基准必须同步改**——
+# 口径 C 的对照值也跟着变（28.0× → 25.1×），否则本脚本会永远报「✗ 偏离」，
+# 而你无法分辨那是币种变少导致的、还是组合层真的写坏了。
 ALL12 = ["BTC", "ETH", "SOL", "BNB", "XRP", "LINK", "UNI", "AAVE",
-         "HYPE", "ZEC", "DOGE", "NEAR"]
+         "HYPE", "ZEC", "NEAR"]
 SWAP_COST = 7e-4          # 与 _report_latest.py 口径 C 的再平衡成本一致
 
 
@@ -70,7 +74,7 @@ def load_coin(c):
     return dict(b4=b4, d1=d1, rg4=rg4, sig=sig, trades=trades, atr=atr, bl4=bl4)
 
 
-print("加载 12 币 …", flush=True)
+print(f"加载 {len(ALL12)} 币 …", flush=True)
 DATA = {c: load_coin(c) for c in ALL12}
 COEF = {c: VT.coef_series(DATA[c]["b4"]) for c in ALL12}
 print("加载完成\n", flush=True)
@@ -224,9 +228,11 @@ for nm, dyn, fq in ARMS:
           + pad("%.2f" % s["calmar"], 9)
           + pad("%.0f 万" % (CAP * s["end"] / 1e4), 13))
 
-print("\n  自检：B_q 应接近 _report_latest.py 的口径 C（约 28.0× / −54.9%）")
+print("\n  自检：B_q 应接近 _report_latest.py 的口径 C（11 币约 25.1× / −54.6%）")
 bq = RES["B_q    季度+固定50万权重（自检）"]
-ok = abs(bq["mult"] - 28.0) / 28.0 < 0.10
+# 对照值 = _report_latest.py 的口径 C，随币种组合变化。2026-11-27 去 DOGE 后 28.0 → 25.1。
+_REF = 25.1
+ok = abs(bq["mult"] - _REF) / _REF < 0.10
 print(f"    B_q = {bq['mult']:.2f}× / {bq['dd'] * 100:.1f}% → "
       f"{'✓ 复现，脚本可信' if ok else '✗ 偏离，先别信 B_full'}")
 

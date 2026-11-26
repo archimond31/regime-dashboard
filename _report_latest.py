@@ -10,7 +10,7 @@
   L2 4H 收盘突破前 20 根极值 → +0.5×（ATR 分位 >85% 拦截，init 血统不开仓）
   L3 出场：状态翻转 / 1.5×ATR(14) / 满 120 根 4H
   执行：底仓现货（不付资金费），加仓层永续；VT60 波动目标化；季度再平衡
-  品种：12 币，AAVE/LINK 降权至 4%
+  品种：11 币（2026-11-27 去 DOGE），AAVE/LINK 降权至 4%
 
 口径：
   A = 本金恒 50 万、每年提走、收益率简单相加（跨年可比，但与复利不同）
@@ -42,8 +42,8 @@ from test_regime_fit import agg4h
 CAP = 500_000
 F4 = BT.FUND_DAILY / 6.0
 START_NAV = "2020-09-01"
-ALL12 = ["BTC", "ETH", "SOL", "BNB", "XRP", "LINK", "UNI", "AAVE",
-         "HYPE", "ZEC", "DOGE", "NEAR"]
+ALL11 = ["BTC", "ETH", "SOL", "BNB", "XRP", "LINK", "UNI", "AAVE",
+         "HYPE", "ZEC", "NEAR"]     # 2026-11-27 去 DOGE（原 12 币）
 W = PC.weights_for(CAP)
 TGT = min(1.0, sum(W.values()))
 YEARS = list(range(2020, 2027))
@@ -70,9 +70,9 @@ def load_coin(c):
     return dict(b4=b4, d1=d1, rg4=rg4, sig=sig, trades=trades, atr=atr, bl4=bl4)
 
 
-print("加载 12 币 …", flush=True)
-DATA = {c: load_coin(c) for c in ALL12}
-COEF = {c: VT.coef_series(DATA[c]["b4"]) for c in ALL12}
+print(f"加载 {len(ALL11)} 币 …", flush=True)
+DATA = {c: load_coin(c) for c in ALL11}
+COEF = {c: VT.coef_series(DATA[c]["b4"]) for c in ALL11}
 print("加载完成\n", flush=True)
 
 
@@ -90,7 +90,7 @@ def new_bseq(c):
 def run(bseq_of, rebal_weights=True):
     """单币独立净值 + 组合净值。返回 (组合曲线, {币: 单币曲线})。"""
     NAVS = {}
-    for c in ALL12:
+    for c in ALL11:
         b4, rg4, sig = DATA[c]["b4"], DATA[c]["rg4"], DATA[c]["sig"]
         b = bseq_of(c)
         pv = []
@@ -124,11 +124,11 @@ def run(bseq_of, rebal_weights=True):
                 nav *= (1 - 100 / 1e4 * math.sqrt(nav * CAP * max(w, 1e-6) * d / qv) * d)
             res[b4[k]["date"]] = nav
         NAVS[c] = res
-    FIRST = {c: min(NAVS[c]) for c in ALL12}
+    FIRST = {c: min(NAVS[c]) for c in ALL11}
     last, units, cq, cash, out = {}, {}, None, 0.0, []
-    ALLD = sorted(set().union(*[set(NAVS[c]) for c in ALL12]))
+    ALLD = sorted(set().union(*[set(NAVS[c]) for c in ALL11]))
     for dt_ in ALLD:
-        live = [c for c in ALL12 if FIRST[c] <= dt_]
+        live = [c for c in ALL11 if FIRST[c] <= dt_]
         if not live:
             continue
         sw = sum(W[c] for c in live)
@@ -225,7 +225,7 @@ print(f"       最大回撤 {mdd * 100:.1f}%   复利年化 {cagr * 100:+.1f}%  
 print(f"       ← **Calmar 与复利年化取自此曲线，仅用于和别的规则横向比较风险效率；")
 print(f"         绝对值不可实现**（净值涨到 {cv_new[-1][1] * CAP / 1e4:.0f} 万时单笔仍是 50 万量）")
 print(f"    ③ 口径 B（全复利 + 每年按当年本金重算权重，受容量约束）")
-print(f"       10.65×  年化 +46.3%   最大回撤 −36.1%   Calmar 1.28　← 诚实口径")
+print(f"       10.34×  年化 +45.5%   最大回撤 −37.1%   Calmar 1.22　← 诚实口径")
 print(f"       （_exp_cum_b.py 可重跑；2026-11-19 的旧值 5.82× 已作废）")
 
 # ---- 【2】近 N 年 ----
@@ -274,7 +274,7 @@ print(f"  旧版累计 {pnl_old / 1e4:+.0f} 万   新版 {tot / 1e4:+.0f} 万   
 print("\n【4】分币种独立净值（各自 1.0 起，同规则同权重口径）")
 print("-" * 104)
 rows = []
-for c in ALL12:
+for c in ALL11:
     v = navs_new[c]
     ds = sorted(v)
     mult = v[ds[-1]]
@@ -303,11 +303,11 @@ print(f"    净值终值 {cv_new[-1][1]:.1f}× —— **这是幻觉，不能用
 print(f"    它假设净值涨到 {cv_new[-1][1] * CAP / 1e4:.0f} 万时单笔仍是 50 万的量，")
 print(f"    实际冲击会超红线十倍以上（详见 portfolio_config 注释）。")
 print(f"  口径 B（全复利 + 每年按当年本金重算权重，受容量约束）")
-print(f"    10.65×、年化 +46.3%、最大回撤 −36.1%、Calmar 1.28")
+print(f"    10.34×、年化 +45.5%、最大回撤 −37.1%、Calmar 1.22（2026-11-27 去 DOGE 后）")
 print(f"    ← 诚实口径，本脚本未重算，直接引用 _exp_cum_b.py")
 print(f"    与口径 C 的唯一差别：净值涨上去后实际投入比例从 2020 的 85.9% 衰减到"
       f" 2026 的 13.9%，")
-print(f"    86% 的钱被迫变现金 → 少赚 66.6% 但回撤也浅了一半（−36.1% vs −54.9%）")
+print(f"    86% 的钱被迫变现金 → 少赚 63.5% 但回撤也浅了三成（−37.1% vs −54.6%）")
 
 # ---- 【6】风险 ----
 print("\n【6】关键风险指标")

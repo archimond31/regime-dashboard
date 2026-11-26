@@ -100,11 +100,14 @@ def _notional(o):
     w = PC.WEIGHTS.get(o["c"], 0.0)
     a = o["action"]
     if a == "建底仓":
-        # 买多少 = 信号表里的 target（已含 VT scale、底仓闸门与 RANGE 来路折扣）。
-        # 旧写法 CAPITAL*w*BASE_RATIO 三样都不含：闸门把底仓砍到 25% 时会虚报 4 倍，
-        # 人照着单子下单就买多了。
+        # 买多少 = 这一单的差额（order_amount，live_signals 用「目标 − 已持有」算好）；
+        # 没有 order_amount 时（手上本来是空的）才回落到 target 全额。
+        # 旧写法 CAPITAL*w*BASE_RATIO 三样都不含：闸门把底仓砍到 25% 时会虚报 4 倍。
         # 显式判 >0 而不是用 `or`：RANGE 来路 DOWN 时 target 恰好是 0，
         # `or` 会把它吞掉、回落到 base_held（全额），变成反向的错误信号。
+        oa = o.get("order_amount")
+        if oa is not None and oa > 0:
+            return round(oa)
         t = o.get("target")
         if t is not None and t > 0:
             return round(t)
@@ -277,7 +280,7 @@ def sync(sig=None):
             delta = round(tgt - real)
             tail = (f'已持有 {round(real)} U，本单补 {delta} U' if real > 0
                     else f'底仓 {round(tgt)} U 应在场')
-            live[k] = dict(o, action="建底仓", target=delta,
+            live[k] = dict(o, action="建底仓", order_amount=delta,
                            note=f'日线 {o.get("regime_start") or bar} 起为 {o["state"]}，'
                                 f'{tail}（4H 突破后再加到峰值）；'
                                 f'退出：日线翻 DOWN 即清底仓，现货无价格止损')

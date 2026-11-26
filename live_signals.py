@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """实盘信号生成（只出信号，绝不下单）。
 
-品种：BTC ETH SOL BNB XRP HYPE LINK UNI AAVE ZEC DOGE NEAR（12 币，2026-11-18 去 CRV）
+品种：BTC ETH SOL BNB XRP HYPE LINK UNI AAVE ZEC NEAR（11 币）
+      2026-11-18 去 CRV 加 ZEC/DOGE/NEAR；2026-11-27 去 DOGE（meme 币）。
+      **COINS 与 portfolio_config.WEIGHTS_SMALL 必须同集**：COINS 多一个 → 该币算出
+      target=0 却被打印成「空仓」；少一个 → 权重表里有钱没处放（静默变现金）。
 
 复刻回测的三层骨架：
   L1  日线 G 状态机定方向与底仓（UP/RANGE → 1.0，DOWN → 0）
@@ -61,10 +64,10 @@ BLOOD_LABEL = {
 }
 
 COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "UNI", "AAVE",
-         "ZEC", "DOGE", "NEAR"]
+         "ZEC", "NEAR"]
 SECTOR = {"BTC": "储值", "ETH": "L1", "SOL": "L1", "BNB": "交易所", "XRP": "支付",
           "HYPE": "DEX/永续", "LINK": "预言机", "UNI": "DeFi", "AAVE": "DeFi",
-          "ZEC": "隐私币", "DOGE": "meme", "NEAR": "L1"}
+          "ZEC": "隐私币", "NEAR": "L1"}
 LOOKBACK, ATR_K, MAX_BARS, VOL_Q = BT.LOOKBACK, BT.ATR_K, BT.MAX_BARS, BT.VOL_Q
 
 
@@ -545,7 +548,9 @@ def main():
         rr = o.get("range_ratio", 1.0)
         # 「该清多少」= min(策略认为该在的量, 手上真实有的量)。
         # 后者更重要：有底仓而策略要清，才发卖单；没货还发卖单就是让人卖他没买的东西
-        # （BTC/ETH/BNB/DOGE/NEAR 这 5 个 DOWN 币手上是零现货，就是这种情形）。
+        # （BTC/ETH/BNB/NEAR 这 4 个 DOWN 币手上是零现货，就是这种情形）。
+        # DOGE 2026-11-27 已移出组合，但它那笔历史空头还在 _signal.json 里留档，
+        # 只是不会再出现在 COINS 循环里。
         real = held.get(o["c"], 0.0)
         if st == "DOWN":
             if real <= 0:
@@ -577,15 +582,29 @@ def main():
                     # 手上已有的不重复买。base_held 是「该持有多少」，
                     # 差额才是这一单要买的。缺了这一步，UP→RANGE 会让
                     # regime_start 变化 → 再发一张全额建仓单 → 同一份底仓买两遍。
-                    delta = round(amt) - round(real)
+                    #
+                    # 「该持有」取 target 而不是 base_held 全额：target 多含了
+                    # **RANGE 来路系数**（rr），base_held 只含 VT scale 与底仓闸门。
+                    # 2026-11-27 之前两者在实盘恒等（每币都正好在目标上，分支早被
+                    # `delta <= 0` 挡掉），所以这个区别看不出来；权重从 9.2% 抬到
+                    # 10.22% 后 SOL 是 RANGE(来路 DOWN)：base_held 282 / target 141，
+                    # 拿 base_held 去算会让人多买一倍。
+                    delta = round(o.get("target") or amt) - round(real)
                     if delta <= 0 or delta < PC.min_order_value(o["c"]):
                         continue
-                    note = (f"日线 {rs} 起为 {st}，底仓应在场 {round(amt)} U；"
+                    note = (f"日线 {rs} 起为 {st}，底仓应在场 {round(o.get('target') or amt)} U；"
                             f"已持有 {round(real)} U，本单补 {delta} U"
                             f"{gtail}{rtail}（4H 突破后再加到峰值）")
                     amt = delta
-                    o["target"] = delta      # 工单金额取差额，不是全额
+                    # **不要写回 o["target"]**：2026-11-27 之前这里写的是
+                    # `o["target"] = delta`，把「该持有多少」覆盖成了「这一单买多少」。
+                    # 后果是页面「该持有」列变成单笔金额、spot_held 的收窄基准也跟着错
+                    # （XRP 真实持有 254 U，被显示成 28 U）。差额走独立字段。
+                    o["order_amount"] = delta
                 else:
+                    # 手上是空的：建多少 = target（含 rr），不是 base_held 全额。
+                    amt = round(o.get("target") or amt)
+                    o["order_amount"] = amt
                     note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
                             f"{gtail}{rtail}（4H 突破后再加到峰值）")
         else:

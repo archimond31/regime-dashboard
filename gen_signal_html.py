@@ -202,7 +202,8 @@ if _SPOT:
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:12px;color:{MU}">'
             f'{_esc(o.get("target_note") or "")}</td></tr>')
     # 日线 DOWN 而没有底仓的币：这是**符合规则**的状态，不是遗漏。
-    # 不写这句，看到「12 个币只有 7 个有货」会以为漏买了。
+    # 不写这句，看到「11 个币只有 7 个有货」会以为漏买了。
+    # （币数会随组合调整而变 —— 2026-11-27 去 DOGE 后是 11，别再写死这个数。）
     _flat = [o["c"] for o in COINS if not _SPOT.get(o["c"]) and o["state"] == "DOWN"]
     spot_block = (
         f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">'
