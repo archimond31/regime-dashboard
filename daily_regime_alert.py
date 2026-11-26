@@ -67,18 +67,50 @@ ASSETS = [
     {"key": "ZEC",  "label": "ZEC Zcash",     "group": "加密", "source": "hyperliquid", "symbol": "ZEC",  "unit": "USD/枚"},
     {"key": "DOGE", "label": "DOGE 狗狗币",   "group": "加密", "source": "hyperliquid", "symbol": "DOGE", "unit": "USD/枚"},
     {"key": "NEAR", "label": "NEAR",          "group": "加密", "source": "hyperliquid", "symbol": "NEAR", "unit": "USD/枚"},
-    # 商品（Yahoo 期货连续）
-    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "商品", "source": "yahoo", "symbol": "GC=F", "unit": "美元/盎司"},
-    {"key": "SI",   "label": "白银 SI 期货",  "group": "商品", "source": "yahoo", "symbol": "SI=F", "unit": "美元/盎司"},
-    {"key": "HG",   "label": "铜 HG 期货",    "group": "商品", "source": "yahoo", "symbol": "HG=F", "unit": "美元/磅"},
-    {"key": "CL",   "label": "WTI 原油 CL",   "group": "商品", "source": "yahoo", "symbol": "CL=F", "unit": "美元/桶"},
-    {"key": "BZ",   "label": "布伦特原油 BZ", "group": "商品", "source": "yahoo", "symbol": "BZ=F", "unit": "美元/桶"},
-    # 天然气与铂金：原油/铜/金银都覆盖不到的两类供需。
-    # 天然气是**区域性商品**（HH 价格由美国本土库存与天气决定，与油价脱钩），
-    # 因此它给的是一条独立的价格信号，不是原油的重复项；
+    # ---- 商品：2026-11-26 从单一「商品」组拆成四组，按定价链条排 ----
+    # 拆的理由不是「金属/农产品」这种商品学分类，是**读数顺序**：
+    #   能源 ≈ 几乎所有商品的成本端，也是最上游的通胀源；
+    #   工业金属 ≈ 需求强度的代理（铜、铝都是地产/电网/制造业的先行量）；
+    #   贵金属 接在「利率」后面 —— 它们的定价核心是实际利率与避险，不是供需；
+    #   农产品 最脱钩：供给由天气和种植周期决定，与宏观流动性几乎无关。
+    # 这个顺序让「成本涨→需求降→避险升→食品涨」这条传导能沿版面从上往下读。
+    #
+    # 量化依据（2024-01 起 730 个交易日，见 _ab_rollgap.py 与边际维度测算）：
+    #   现有 7 个商品合起来 = 3.67 个有效独立维度（(Σλ)²/Σλ²），
+    #   而农产品/软商品与这 7 个两两相关全在 ±0.17 以内，边际增量 +0.73~0.79；
+    #   反过来，汽油对布油 0.77、取暖油对 WTI 0.79、钯金对铂金 0.77 ——
+    #   这三个只是已有品种的复述，边际增量 0.05~0.17，故**不加**。
+
+    # 能源
+    {"key": "CL",   "label": "WTI 原油 CL",   "group": "能源", "source": "yahoo", "symbol": "CL=F", "unit": "美元/桶"},
+    {"key": "BZ",   "label": "布伦特原油 BZ", "group": "能源", "source": "yahoo", "symbol": "BZ=F", "unit": "美元/桶"},
+    # 天然气是**区域性商品**：HH 价格由美国本土库存与天气决定，与油价脱钩。
+    # 它给的是独立的价格信号，不是原油的重复项（实测与布油相关也低）。
+    {"key": "NG",   "label": "天然气 NG",     "group": "能源", "source": "yahoo", "symbol": "NG=F", "unit": "美元/MMBtu"},
+
+    # 工业金属
+    {"key": "HG",   "label": "铜 HG 期货",    "group": "工业金属", "source": "yahoo", "symbol": "HG=F", "unit": "美元/磅"},
+    # 铝是「固态电力」：电解铝成本里电价占四成以上，中国产能受能耗双控约束。
+    # 与铜相关 0.42（部分重叠），但它的供给端故事（电力、产能天花板）铜没有。
+    {"key": "ALI",  "label": "铝 ALI 期货",   "group": "工业金属", "source": "yahoo", "symbol": "ALI=F", "unit": "美元/吨"},
+
+    # 贵金属
+    {"key": "GOLD", "label": "黄金 GC 期货",  "group": "贵金属", "source": "yahoo", "symbol": "GC=F", "unit": "美元/盎司"},
+    {"key": "SI",   "label": "白银 SI 期货",  "group": "贵金属", "source": "yahoo", "symbol": "SI=F", "unit": "美元/盎司"},
     # 铂金一半需求在汽车催化剂、一半在工业与首饰，与黄金的避险属性不同源。
-    {"key": "NG",   "label": "天然气 NG",     "group": "商品", "source": "yahoo", "symbol": "NG=F", "unit": "美元/MMBtu"},
-    {"key": "PL",   "label": "铂金 PL",       "group": "商品", "source": "yahoo", "symbol": "PL=F", "unit": "美元/盎司"},
+    {"key": "PL",   "label": "铂金 PL 期货",  "group": "贵金属", "source": "yahoo", "symbol": "PL=F", "unit": "美元/盎司"},
+
+    # 农产品（谷物 + 软商品）。**单位是美分，不是美元** —— 456 是 4.56 美元/蒲式耳，
+    # 写成「美元/蒲式耳」会让人把玉米读成 456 美元，差两个数量级。
+    {"key": "ZC",   "label": "玉米 ZC 期货",  "group": "农产品", "source": "yahoo", "symbol": "ZC=F", "unit": "美分/蒲式耳"},
+    {"key": "ZS",   "label": "大豆 ZS 期货",  "group": "农产品", "source": "yahoo", "symbol": "ZS=F", "unit": "美分/蒲式耳"},
+    {"key": "ZW",   "label": "小麦 ZW 期货",  "group": "农产品", "source": "yahoo", "symbol": "ZW=F", "unit": "美分/蒲式耳"},
+    # 糖是「农产品 ↔ 能源」的桥梁：巴西甘蔗可以榨糖也可以做乙醇，
+    # 所以糖价与油价存在真实的替代关系，这是别的农产品没有的。
+    {"key": "SB",   "label": "糖 SB 期货",    "group": "农产品", "source": "yahoo", "symbol": "SB=F", "unit": "美分/磅"},
+    {"key": "KC",   "label": "咖啡 KC 期货",  "group": "农产品", "source": "yahoo", "symbol": "KC=F", "unit": "美分/磅"},
+    # 棉花的下游是纺织出口链，是农产品里唯一与中国制造业订单直接挂钩的品种。
+    {"key": "CT",   "label": "棉花 CT 期货",  "group": "农产品", "source": "yahoo", "symbol": "CT=F", "unit": "美分/磅"},
     # ---- 2026-11-25 起按「定价链条」分组：外汇 → 利率 → 信用 → 权益 ----
     # 原来的「宏观」组只有 QQQ/SPY/TLT 三个，既看不出美元这个定价锚，也看不出
     # 信用利差和利率曲线形态。分组重排后每个组对应链条上的一环，
@@ -135,9 +167,12 @@ ASSETS = [
 
 # 分组顺序 = 「定价链条」顺序，不是按品种数量。
 # 外汇（美元）是最上游的锚 → 利率 → 信用（风险偏好） → 权益 → 商品 → 加密（最下游、最高 beta）。
-# 加密放在最后是有意的：它 13 个品种只值 1.8 个有效独立维度（见 README / _ab_adjclose.py），
+# 2026-11-26 起商品再拆四段，链条延长为：
+#   能源（成本）→ 工业金属（需求）→ 贵金属（实际利率/避险）→ 农产品（供给与天气）
+# 加密放在最后是有意的：它 13 个品种只值约 2.4 个有效独立维度（见 _ab_adjclose.py），
 # 占版面最多但信息最少，不该排在「看全球动向」的第一屏。
-GROUP_ORDER = ["外汇", "利率", "信用", "权益", "A股", "港股", "商品", "加密"]
+GROUP_ORDER = ["外汇", "利率", "信用", "权益", "A股", "港股",
+               "能源", "工业金属", "贵金属", "农产品", "加密"]
 
 # A 股时区与收盘时刻：15:00（北京时间）之后当日 bar 才算完整
 CN_TZ = timezone(timedelta(hours=8))
