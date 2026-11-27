@@ -110,12 +110,19 @@ def main():
     lperp = ledger_perp(TK.load()["items"])
     aspot = snap.get("spot") or {}
     aperp = (snap.get("perp") or {}).get("pos") or {}
+    perp_ok = bool(snap.get("perp_ok", True))
 
     print(f"快照 {snap['ts']}（{snap.get('age_min', 0):.0f} 分钟前）　"
-          f"权益 {snap['equity']:,.0f} U　信号 bar {sig.get('bar4h')}")
-    print(f"账户 = 现货 {snap['spot_value']:,.0f} + 合约钱包 "
-          f"{(snap.get('perp') or {}).get('wallet', 0):,.0f}"
-          f" + 浮盈 {(snap.get('perp') or {}).get('upnl', 0):+,.0f}")
+          f"权益 {snap['equity']:,.0f} U"
+          f"{'（**仅现货，合约读不到**）' if not perp_ok else ''}"
+          f"　信号 bar {sig.get('bar4h')}")
+    if perp_ok:
+        print(f"账户 = 现货 {snap['spot_value']:,.0f} + 合约钱包 "
+              f"{(snap.get('perp') or {}).get('wallet', 0):,.0f}"
+              f" + 浮盈 {(snap.get('perp') or {}).get('upnl', 0):+,.0f}")
+    else:
+        print(f"账户 = 现货 {snap['spot_value']:,.0f}（合约端点不可用："
+              f"{str(snap.get('perp_err'))[:90]}）")
 
     # ---------------- 【1】现货层 ----------------
     print("\n【1】现货层（目标：UP/RANGE = base_held × range_ratio；**DOWN 目标为 0**）")
@@ -155,6 +162,16 @@ def main():
     # ---------------- 【2】永续层 ----------------
     print("\n【2】永续层（目标 = target − 现货目标）")
     print("-" * 104)
+    if not perp_ok:
+        print("  合约端点读不到 —— 这一段只能看台账，**没有账户侧可比**。")
+        print("  原因：这把 key 没有 futures 权限（只读现货的 key 就是这样）。")
+        print("  影响：永续加仓层仍然只能从台账推，页面会继续标「推定」。")
+        print("-" * 104)
+        print("\n【3】结论")
+        print("-" * 104)
+        print("  现货层可以对账；永续层跳过。要让永续也有事实数，")
+        print("  需要在币安给这把 key 勾 Enable Futures（可交易权限）+ IP 白名单。")
+        return 0
     print(pad("币", 8, False) + pad("目标", 10) + pad("台账净额", 11)
           + pad("账户名义", 11) + pad("台账−账户", 11) + pad("账户−目标", 11)
           + "  说明")

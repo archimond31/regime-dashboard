@@ -118,13 +118,24 @@ def cex_view(cfg):
 
     原来这里另写了一份 `signed_get`（只覆盖合约），于是同一个"账户实际持仓"存在两个
     实现。这正是本项目反复踩的「同一件事两处各算一遍」，第 N+1 次。现在只留一份。
+
+    合约端点允许失败：只读现货的 key（比如币安的「税务报告 API」）拿不到 futures 权限，
+    `/fapi/v2/*` 会 403。这时仍要能出对账报告 —— 只是永续那一层留空并标注，
+    而不是整个脚本崩掉、什么也没告诉你。
     """
     import binance_account as BA
     spot, _acc = BA.spot_balances(cfg)
-    cx = BA.futures_state(cfg)
+    perp_ok, perp_err = True, None
+    try:
+        cx = BA.futures_state(cfg)
+    except Exception as e:                                   # noqa: BLE001
+        perp_ok, perp_err = False, str(e)
+        cx = {"wallet": 0.0, "upnl": 0.0, "avail": 0.0, "maint": 0.0, "pos": {}}
     cx["spot"] = {k: v for k, v in spot.items() if k != "USDT"}
     cx["cash_usdt"] = float(spot.get("USDT", {}).get("qty", 0.0))
     cx["spot_value"] = float(sum(v["usd"] for v in spot.values()))
+    cx["perp_ok"] = perp_ok
+    cx["perp_err"] = perp_err
     return cx
 
 
@@ -232,6 +243,14 @@ def html_report(lv, cx, rc, cfg):
                  f'⚠ 账户权益 {num(rc["equity"])} U 与信号本金 {num(rc["sig_cap"])} U '
                  f'偏离 {rc["cap_drift"] * 100:+.1f}%，目标仓位是按后者算的。'
                  f'<b>请把 CAPITAL 同步成当前权益并重跑信号</b>，否则每次下单量都会偏。</div>')
+    if cx.get("perp_ok") is False:
+        warn += ('<div style="border-left:4px solid #6a1b9a;background:#f3e5f5;padding:9px 12px;'
+                 'margin:12px 0;font-size:13px;color:#4a148c">'
+                 '⚠ <b>合约端点读不到，本报告的「实际」只含现货。</b>'
+                 f'原因：{str(cx.get("perp_err"))[:120]}<br>'
+                 '只读现货的 key（例如币安「税务报告 API」）没有 futures 权限，'
+                 '这是正常的。永续加仓层这一半仍是推定值 —— 别把「目标 vs 实际」的差额'
+                 '当成要下的单。</div>')
     if rc["bad"]:
         warn += (f'<div style="border-left:4px solid #c62828;background:#ffebee;padding:9px 12px;'
                  f'margin:12px 0;font-size:13px;color:#b71c1c">'

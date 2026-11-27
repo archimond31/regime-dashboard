@@ -29,18 +29,48 @@
 - 明文只在内存里存在一次请求的时间，不落盘、不进日志、不进 json。
 - 打印一律走 `mask()`（`AbCdEf…wXyZ`），任何地方都不出现完整 secret。
 
-## 权限清单（照这个勾，勾错会被本模块拒绝保存）
+## 用哪种 key：「税务报告 API」够不够？
+
+币安在 API 管理页另有一个「创建税务报告 API / Create Tax Report API」入口。**它不是一套新接口** ——
+官方开发者社区的答复是：
+
+> "There is no new API endpoint released for tax reporting. The newly introduced tax API
+>  introduces a special api key that only has read access to user's info."
+> "The Tax API Key has no additional functionality from a regular API Key.
+>  The difference between the two are the permissions, a Tax API Key is set to READ-ONLY."
+
+所以：
+- **好处**：它天生只读、不能下单不能提现，是币安给的最干净的一把钥匙；而且每账户只能建一把，
+  丢了要删了重建（会影响已经连上的报税工具）。
+- **局限**：它的权限就是「Enable Reading」。而**读 USDT-M 合约端点需要 futures 权限**，
+  这是一个**可交易**权限 —— 只读的税务 key 拿不到。实测口径见下。
+
+| 能读到 | Enable Reading（税务 key / 普通只读 key） | 加上 Enable Futures |
+|---|---|---|
+| 现货余额、现货估值 | ✓ | ✓ |
+| USDT-M 钱包/持仓/标记价 | ✗ | ✓ |
+| 下单 / 提现 | ✗ | 下单 ✓ / 提现 ✗ |
+
+结论：**税务 key 可以把现货底仓（1.0× 那一层）变成事实数，加仓层（0.5× 永续）仍然只能靠台账推。**
+要补齐永续那层，就只能在币安给它勾 Enable Futures —— 接受「技术上能下单」，靠 IP 白名单兜。
+另注：有资料称不开 IP 白名单时系统生成的 key 只能拥有 Enable Reading，勾不上其他权限。
+
+**不要靠文档下结论，跑一次 `test` 就有答案**：它会分别实调
+`/api/v3/account`、`/fapi/v2/account`、`/sapi/v1/account/apiRestrictions`，
+通不通是事实，不是声明。
+
+## 权限清单（普通 key，照这个勾）
 
   子账号 → API 管理 → 创建 API：
-    ✅ Enable Reading                     ← 唯一需要的
+    ✅ Enable Reading                     ← 唯一需要的（只读现货）
     ✅ Restrict access to trusted IPs only ← 强烈建议（填你的出口 IP）
     ❌ Enable Spot & Margin Trading        ← 关掉
-    ❌ Enable Futures                      ← 关掉
     ❌ Enable Withdrawals                  ← 关掉（这条最要命）
     ❌ Enable Internal Transfer            ← 关掉（子账号间可以互转，等于绕过提现限制）
+    ⚠ Enable Futures                       ← **只在需要读永续持仓时才开**，开了就等于允许下单
 
-`set` 会调 `GET /sapi/v1/account/apiRestrictions` 核对上面四项，任何一项开着就**拒绝保存**
-（要硬存加 `--force`，但只要认读就该把权限改掉）。
+`set` 会调 `GET /sapi/v1/account/apiRestrictions` 核对上面几项，任何一项不该开的开着就**拒绝保存**
+（要硬存加 `--force`）。拿不到权限表也不硬拦 —— 改看三个端点实测通不通。
 
 ## 接口
 
@@ -433,23 +463,70 @@ def futures_state(creds):
             "pos": pos}
 
 
+def probe(creds):
+    """能力探测：三个能力分别试，**不因为一个失败就否掉整个 key**。
+
+    为什么需要这个而不是只看 `apiRestrictions`：
+      · 「税务报告 API」是币安的一种特殊 key —— 官方开发者社区明确说
+        **没有新增任何 /tax 接口**，它就是一把「只读」的普通 key
+        （"The Tax API Key has no additional functionality from a regular API Key.
+          The difference between the two are the permissions, a Tax API Key is set to
+          READ-ONLY"）。所以能不能读合约，取决于**它有没有 futures 权限**，
+        而不是取决于它是哪种 key。
+      · 而且 `sapi/v1/account/apiRestrictions` 未必对这类 key 开放。只靠它判，
+        会把一把能用的 key 判死。
+
+    所以：权限表能读就读（用来核对），读不到就退化成"能不能真的取到数"。
+    **能取到数比能读到权限表更有说服力** —— 前者是事实，后者是声明。
+    """
+    out = {"restrictions": None, "rows": None, "spot": None, "futures": None,
+           "errors": {}}
+    try:
+        ok, rows, raw = api_restrictions(creds)
+        out["restrictions"], out["rows"], out["raw"] = ok, rows, raw
+    except Exception as e:                                   # noqa: BLE001
+        out["errors"]["restrictions"] = str(e)
+    try:
+        spot_balances(creds)
+        out["spot"] = True
+    except Exception as e:                                   # noqa: BLE001
+        out["spot"] = False
+        out["errors"]["spot"] = str(e)
+    try:
+        futures_state(creds)
+        out["futures"] = True
+    except Exception as e:                                   # noqa: BLE001
+        out["futures"] = False
+        out["errors"]["futures"] = str(e)
+    return out
+
+
 def snapshot(creds=None, write=True, quiet=False):
     """统一快照。**这是唯一对外的出口**，live_signals / ticket / 报表都读这个结构。
 
     返回：{
       ts, spot_value, spot:{ASSET:{qty,px,usd}}, cash_usdt,
-      perp:{wallet,upnl,avail,maint,pos:{COIN:{...}}},
+      perp:{wallet,upnl,avail,maint,pos:{COIN:{...}}}, perp_ok,
       equity, gross, net
     }
     equity = 现货估值 + 合约钱包 + 合约浮盈
       ← 不能用「现货 + 可用保证金」：合约的钱包余额已经包含被占用的保证金，
         再加一遍可用会把权益算大。
+
+    `perp_ok=False`（只读现货的 key，或合约端点没权限）时合约那几项记 0，
+    `equity` 只含现货并标 `equity_partial=True` —— **不要静默当成"合约没钱了"**，
+    那会让「总敞口 0.5×」看起来像清仓了。
     """
     creds = creds or load_creds()
     if not creds:
         raise RuntimeError("没有凭据，先 `python binance_account.py set`")
     spot, _acc = spot_balances(creds)
-    perp = futures_state(creds)
+    perp_ok, perp_err = True, None
+    try:
+        perp = futures_state(creds)
+    except Exception as e:                                   # noqa: BLE001
+        perp_ok, perp_err = False, str(e)
+        perp = {"wallet": 0.0, "upnl": 0.0, "avail": 0.0, "maint": 0.0, "pos": {}}
     spot_value = sum(v["usd"] for v in spot.values())
     cash = spot.get("USDT", {}).get("qty", 0.0)
     equity = spot_value + perp["wallet"] + perp["upnl"]
@@ -460,7 +537,9 @@ def snapshot(creds=None, write=True, quiet=False):
     snap = {"ts": now_bj().strftime("%Y-%m-%d %H:%M:%S"),
             "ts_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "spot": spot, "cash_usdt": cash, "spot_value": spot_value,
-            "perp": perp, "equity": equity, "gross": gross, "net": net,
+            "perp": perp, "perp_ok": perp_ok, "perp_err": perp_err,
+            "equity": equity, "equity_partial": not perp_ok,
+            "gross": gross, "net": net,
             "proxy": proxy_url() or "（直连）"}
     if write:
         # 原子替换：读的一方（live_signals）可能正在读，不能让它读到半个文件
@@ -468,8 +547,12 @@ def snapshot(creds=None, write=True, quiet=False):
         json.dump(snap, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         os.replace(tmp, SNAP)
     if not quiet:
-        print(f"  权益 {equity:,.0f} U = 现货 {spot_value:,.0f} + 合约钱包 "
-              f"{perp['wallet']:,.0f} + 浮盈 {perp['upnl']:+,.0f}")
+        if perp_ok:
+            print(f"  权益 {equity:,.0f} U = 现货 {spot_value:,.0f} + 合约钱包 "
+                  f"{perp['wallet']:,.0f} + 浮盈 {perp['upnl']:+,.0f}")
+        else:
+            print(f"  权益 {equity:,.0f} U = **仅现货**（合约读不到，这是半个账户）")
+            print(f"    合约端点失败：{perp_err}")
         print(f"  现货 {len([k for k in snap['spot'] if k != 'USDT'])} 个币、"
               f"现金 {cash:,.0f} U；合约 {len(perp['pos'])} 个持仓、"
               f"可用保证金 {perp['avail']:,.0f} U")
@@ -591,25 +674,48 @@ def _cmd_set(argv):
         return 1
     print(f"  key = {mask(key)}  长度 {len(key)}")
     creds = {"key": key, "secret": secret}
-    print("\n核对权限 …")
-    try:
-        ok, rows, raw = api_restrictions(creds)
-    except Exception as e:                                   # noqa: BLE001
-        print(f"  自检失败：{e}")
-        print("  连权限都读不到，说明 key/IP/代理至少有一项不对，先别存。")
-        return 1
-    for r in rows:
-        mark = "✓" if not r["bad"] else ("✗" if r["want"] else "!")
-        print(f"  {mark} {r['label']:14} 期望 {'开' if r['want'] else '关'}，"
-              f"实际 {'开' if r['got'] else '关'}")
-    if not ok and not force:
+    print("\n探测能力（权限表 + 三个端点各试一次）…")
+    pr = probe(creds)
+    if pr["rows"]:
+        for r in pr["rows"]:
+            mark = "✓" if not r["bad"] else ("✗" if r["want"] else "!")
+            print(f"  {mark} {r['label']:14} 期望 {'开' if r['want'] else '关'}，"
+                  f"实际 {'开' if r['got'] else '关'}")
+    else:
+        print(f"  · 权限表读不到（{pr['errors'].get('restrictions', '')[:90]}）")
+        print("    有些 key 类型不开放这个端点，改用下面三项实测判断。")
+    print(f"  {'✓' if pr['spot'] else '✗'} 现货读取  "
+          f"{'通' if pr['spot'] else pr['errors'].get('spot', '')[:100]}")
+    print(f"  {'✓' if pr['futures'] else '✗'} 合约读取  "
+          f"{'通' if pr['futures'] else pr['errors'].get('futures', '')[:100]}")
+
+    if pr["restrictions"] is False and not force:
         print("\n拒绝保存：这个 key 不是纯只读。")
         print("  去币安把交易/提现/划转权限关掉再重来；确定要硬存加 --force。")
         return 1
-    p = save_creds(key, secret, {"readonly_ok": ok,
-                                 "restrictions": {r["field"]: r["got"] for r in rows}})
+    if not pr["spot"]:
+        print("\n拒绝保存：现货都读不到，这把 key 对我们没有用处。")
+        print("  先确认 Enable Reading 已勾，且代理是通的。")
+        return 1
+    if not pr["futures"]:
+        print("\n⚠ 合约读不到 —— 能存，但只能用一半：")
+        print("   · 现货底仓（1.0× 那层）是事实数 ✓")
+        print("   · 永续加仓层（0.5× 那层）仍只能从台账推，页面会标「推定」")
+        print("   要补上合同层，需要在币安给这把 key 加 Enable Futures 权限。")
+        print("   **那是一个可交易权限** —— 加之前请务必同时设 IP 白名单，")
+        print("   并接受「技术上它能下单」。我们这边永远只发 GET。")
+    caps = {"spot": pr["spot"], "futures": pr["futures"],
+            "restrictions": pr["restrictions"]}
+    p = save_creds(key, secret, {
+        "readonly_ok": bool(pr["restrictions"]),
+        "caps": caps,
+        "restrictions": ({r["field"]: r["got"] for r in pr["rows"]}
+                         if pr["rows"] else None),
+    })
     print(f"\n已加密写入 {p}")
     print(f"  加密方式 DPAPI（绑定当前 Windows 用户 {os.environ.get('USERNAME')}）")
+    print(f"  能力 现货={'✓' if caps['spot'] else '✗'}　"
+          f"合约={'✓' if caps['futures'] else '✗'}")
     print("  下一步：python binance_account.py snap")
     return 0
 
@@ -621,17 +727,24 @@ def _cmd_test(argv):
         return 1
     print(f"凭据 {mask(creds['key'])}，存于 {store_path()}")
     print(f"代理 {proxy_url() or '（直连，国内大概率 502）'}")
-    try:
-        ok, rows, _raw = api_restrictions(creds)
-    except Exception as e:                                   # noqa: BLE001
-        print(f"权限自检失败：{e}")
+    print("\n探测能力 …")
+    pr = probe(creds)
+    if pr["rows"]:
+        for r in pr["rows"]:
+            mark = "✓" if not r["bad"] else ("✗" if r["want"] else "!")
+            print(f"  {mark} {r['label']:14} 期望 {'开' if r['want'] else '关'}，"
+                  f"实际 {'开' if r['got'] else '关'}")
+        if pr["restrictions"] is False:
+            print("  ⚠ 这个 key 不是纯只读 —— 建议立刻去交易所收权限")
+    else:
+        print(f"  · 权限表读不到：{pr['errors'].get('restrictions', '')[:110]}")
+    print(f"  {'✓' if pr['spot'] else '✗'} 现货读取  "
+          f"{'通' if pr['spot'] else pr['errors'].get('spot', '')[:110]}")
+    print(f"  {'✓' if pr['futures'] else '✗'} 合约读取  "
+          f"{'通' if pr['futures'] else pr['errors'].get('futures', '')[:110]}")
+    if not pr["spot"]:
+        print("\n现货都读不到，先别往下走。")
         return 1
-    for r in rows:
-        mark = "✓" if not r["bad"] else ("✗" if r["want"] else "!")
-        print(f"  {mark} {r['label']:14} 期望 {'开' if r['want'] else '关'}，"
-              f"实际 {'开' if r['got'] else '关'}")
-    if not ok:
-        print("  ⚠ 这个 key 不是纯只读 —— 建议立刻去交易所收权限")
     print()
     try:
         snapshot(creds)
@@ -652,12 +765,20 @@ def _cmd_show(argv):
     print(f"  secret {mask(creds['secret'])}")
     print(f"  存入   {creds.get('saved_bj')}")
     print(f"  只读   {creds.get('readonly_ok')}")
+    caps = creds.get("caps") or {}
+    if caps:
+        print("  能力   现货=%s　合约=%s　权限表=%s" % (
+            "✓" if caps.get("spot") else "✗",
+            "✓" if caps.get("futures") else "✗",
+            "✓" if caps.get("restrictions") else "✗"))
     r = creds.get("restrictions") or {}
     if r:
         print("  权限   " + "，".join(f"{k}={'开' if v else '关'}" for k, v in r.items()))
     s = read_snapshot(max_age_min=0)
     if s:
-        print(f"  快照   {s['ts']}（{s['age_min']} 分钟前）权益 {s['equity']:,.0f} U")
+        half = "（仅现货，合约缺失）" if s.get("equity_partial") else ""
+        print(f"  快照   {s['ts']}（{s['age_min']} 分钟前）"
+              f"权益 {s['equity']:,.0f} U{half}")
     return 0
 
 
