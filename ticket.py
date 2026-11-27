@@ -557,6 +557,11 @@ def render():
     # 敞口也印两个口径：**策略书的净敞口 ≠ 实盘账户的净敞口**。
     # 策略含做空时，账本净 +424 U(0.21×)，而现货账户实际 +1,004 U(0.50×)，差 2.4 倍。
     # 只印一个，看的人会拿错的那个去做风控判断。
+    #
+    # 2026-11-27 更正：用户**有**合约账户，永续层是能执行的。所以这里的「实盘」现在
+    # 指的是**现货底仓**，不是账户总敞口 —— 一旦有「开仓」工单被 done，账户里会多出
+    # 永续仓，而下面这个数不含它。要算账户总敞口，得再加上 done 的开仓·多 减去平仓。
+    # （此前这里把「没有合约账户」当成既定事实，是记错了，别在这条上再推一遍。）
     gross = sum(abs(o.get("target") or 0) for o in CUR.values())
     lev = (gross / PC.CAPITAL) if PC.CAPITAL else 0.0
     net_s = sum(o.get("target") or 0 for o in CUR.values()) / PC.CAPITAL if PC.CAPITAL else 0.0
