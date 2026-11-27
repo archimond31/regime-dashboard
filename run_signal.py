@@ -96,6 +96,16 @@ def main():
 
     if not step("① 拉数据 + 算信号", ["live_signals.py"]):
         return 1
+    # ①a 刷新只读账户快照。**没有密钥就整段跳过**，行为与接入前完全一致。
+    # 放在出信号之后、同步工单之前：ticket.sync 与页面都要读 .cex_snapshot.json。
+    # 非致命 —— 币安限频/挂掉不该让一整封信号邮件发不出去，
+    # 读不到就用上一次的快照，上次也没有就退回纯台账模式（页面会标「推定」）。
+    try:
+        import binance_account as BA
+        if BA.enabled():
+            step("①a 刷新账户快照", ["binance_account.py", "snap"], fatal=False)
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[账户] 跳过（{type(e).__name__}: {e}）", flush=True)
     # 工单同步放在渲染之前：gen_signal_html 和 notify_mail 都要读 _tickets.json，
     # 顺序反了就会读到上一轮的状态（比如刚触发的动作在工单区里还不存在）。
     # 非致命：工单层挂了不该阻断信号本身。
