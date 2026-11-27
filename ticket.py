@@ -288,8 +288,32 @@ def sync(sig=None):
     opened = 0
     opened_ids = []
     for k, o in live.items():
-        if any(i["key"] == k for i in items):
-            continue                      # 开过就不再开（无论 done / drop / void）
+        prev = [i for i in items if i["key"] == k]
+        if prev:
+            last = prev[-1]
+            # ---- 去重口径必须按「层」分开：现货一段一次，4H 层一次事件一次 ----
+            # 原写法是 `if any(key) → continue`（无论 done/drop/void），把两类动作
+            # 当成一件事。实际上 regime_start 只在**日线翻状态**时才变，于是一整段
+            # UP 里「每类动作一辈子只能发一次」——2026-11-24/26/27 三次实测漏发：
+            #   · 11-24 08:05 LINK 止损临近（距止损 1.06%）122 U → 0 新单
+            #   · 11-26 00:05 NEAR 开仓·空 54 U → 0 新单
+            #   · 11-27 12:05 LINK 开仓 122 U → 0 新单
+            # 三次的共同点：第一张单被 void（行情变化自动作废），后续同段的新突破
+            # / 新止损提醒被永久挡掉，而页面和日志照样写「需要动作 1 个」。
+            #
+            # 现货底仓（建/清）维持「一段一次」：同一段不该重复买同一份底仓，
+            # 金额也已经由 live_signals 的「目标 − 已持有」和 _held_from_ledger 核对过。
+            if o["action"] in ("建底仓", "清底仓"):
+                continue
+            # 4H 层（开仓/平仓/止损临近/即将到期）：只挡**已执行**和**还挂着**的。
+            # void/drop = 那一次没执行成（行情变了 / 人放弃），同段里再出现新的突破
+            # 就是新的一次机会，应当重新发单。
+            if last["status"] in ("done", "open"):
+                continue
+            # 同一根 4H 不重复发：一轮里 sync 可能被调多次，避免刷屏。
+            # 换了一根 bar 才允许 —— 那时是「又一次突破」，不是「同一次被重放」。
+            if last.get("bar") == bar:
+                continue
         it = new_item(o, bar)
         it["id"] = d["next_id"]
         d["next_id"] += 1

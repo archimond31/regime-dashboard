@@ -298,3 +298,7 @@ holding_*.png
 
 # 不入库：_res_bottom_report.md（回撤与加仓研究）。它包含个人财务处境描述，
 #   本仓库是 public，这类内容不应该进版本库。
+
+# 工单去重口径的回归检查（2026-11-27）：4H 层只挡 done/open，现货一段一次。
+# ticket.sync 的注释直接引用它的七种情形，不入库则那条规则无法复核。
+!_verify_ticket_dedup.py
