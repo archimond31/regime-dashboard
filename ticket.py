@@ -525,6 +525,51 @@ def _cur_sig():
         return {}, PC.CAPITAL, {}
 
 
+def perp_net(items=None):
+    """永续层的净名义（U，正=净多 / 负=净空）+ 毛 + 笔数。**从已执行记录推，不猜。**
+
+    == 为什么需要它 ==
+    现货底仓有台账（建底仓 − 清底仓），所以 `spot_held` 是事实。永续层原来没有任何
+    汇总口径，于是「实盘 现货 1,004 U（净 +0.50×）」这句话在 2026-11-27 开出一笔
+    LINK 永续之后就不再是账户状态了 —— 它只说了现货那一半，而人会把整句话
+    当成「我的敞口」。这是本项目第五次「两个数该相等但各算一遍」的同类问题，
+    只不过这次是**少算了一半**，不是算错。
+
+    只认 status=done：open 是「还没做」，void/drop 是「没做」，都不进敞口。
+
+    != 账户权益 !=
+    这里算的是**名义敞口**，不是钱。合约账户里那 300 U 余额（保证金 + 闲置）不在
+    任何地方记录 —— 权益要自己盯着交易所。名义能算，是因为台账里有金额有方向。
+    """
+    items = load()["items"] if items is None else items
+    net = gross = 0.0
+    n = 0
+    for i in items:
+        if i.get("status") != "done":
+            continue
+        if i.get("kind") not in ("开仓", "平仓", "止损临近", "即将到期"):
+            continue
+        amt = i.get("fill_notional")
+        amt = abs(float(amt)) if amt is not None else abs(float(i.get("notional") or 0))
+        if amt <= 0:
+            continue
+        sgn = 1.0 if i.get("kind") == "开仓" else -1.0
+        # 开仓带方向（side<0 为空头）；平仓的方向是「减掉原来那一边」，
+        # 所以减号加回原方向 —— 台账里平仓单的 side 已经是反向的，
+        # 直接乘 side 会把「平空」算成「加多」。
+        if i.get("kind") == "开仓":
+            net += sgn * (1 if i.get("side", 1) > 0 else -1) * amt
+            gross += amt
+            n += 1
+        else:
+            # 平仓：方向由 pos_side 给出（平多也是卖，不能看 side）
+            ps = i.get("pos_side") or 0
+            net -= (1 if ps >= 0 else -1) * amt
+            gross = max(0.0, gross - amt)
+            n += 1
+    return {"net": net, "gross": gross, "n": n}
+
+
 def render():
     """给邮件正文用的工单区 HTML（内联样式 + table，和 gen_signal_html 同规矩）。"""
     d = load()
@@ -626,14 +671,17 @@ def render():
     # 策略含做空时，账本净 +424 U(0.21×)，而现货账户实际 +1,004 U(0.50×)，差 2.4 倍。
     # 只印一个，看的人会拿错的那个去做风控判断。
     #
-    # 2026-11-27 更正：用户**有**合约账户，永续层是能执行的。所以这里的「实盘」现在
-    # 指的是**现货底仓**，不是账户总敞口 —— 一旦有「开仓」工单被 done，账户里会多出
-    # 永续仓，而下面这个数不含它。要算账户总敞口，得再加上 done 的开仓·多 减去平仓。
-    # （此前这里把「没有合约账户」当成既定事实，是记错了，别在这条上再推一遍。）
+    # 2026-11-27 更正：用户**有**合约账户，永续层是能执行的。所以「实盘」分两层：
+    # 现货底仓（台账建/清底仓）＋ 永续加仓层（台账 done 的开仓 − 平仓）。
+    # 只印现货那一层，人会把「1,004 U / +0.50×」当成整个账户状态 —— 2026-11-27
+    # 开出一笔 LINK 永续之后这句话就少说了 40 U。要算**权益**还得加上合约账户
+    # 余额（保证金 + 闲置），那个数台账里没有，只能看交易所。
+    PN = perp_net(d["items"])
     gross = sum(abs(o.get("target") or 0) for o in CUR.values())
     lev = (gross / PC.CAPITAL) if PC.CAPITAL else 0.0
     net_s = sum(o.get("target") or 0 for o in CUR.values()) / PC.CAPITAL if PC.CAPITAL else 0.0
     net_r = (sum(SPOT.values()) / PC.CAPITAL) if PC.CAPITAL else 0.0
+    net_all = ((sum(SPOT.values()) + PN["net"]) / PC.CAPITAL) if PC.CAPITAL else 0.0
     stale_cap = (SIG_CAP and abs(SIG_CAP - PC.CAPITAL) > 1.0)
     bar = (f'<div style="padding:7px 12px;background:#fffaf5;border-bottom:1px solid #f0d9d9;'
            f'font-size:12px;color:#5d4037">'
@@ -642,6 +690,10 @@ def render():
            f'策略书 净敞口 <b>{net_s:+.2f}×</b>（毛 {gross:,.0f} U / {lev:.2f}×）'
            + (f'　｜　实盘 现货 <b>{sum(SPOT.values()):,.0f} U</b>'
               f'（净 {net_r:+.2f}×）' if SPOT else '')
+           + (f'　｜　永续 <b>{PN["net"]:+,.0f} U</b>（{PN["n"]} 笔已执行，'
+              f'毛 {PN["gross"]:,.0f} U）' if PN["n"] else '')
+           + (f'<br>实盘合计敞口 <b>{sum(SPOT.values()) + PN["net"]:,.0f} U</b>'
+              f'（净 {net_all:+.2f}×）' if PN["n"] else '')
            + f'<br>待买 <b>{buy_sum:,.0f} U</b> / 待卖 <b>{sell_sum:,.0f} U</b>'
            + (f'　<span style="color:#ef6c00">⚠ {stale_n} 张单的原金额已过时，表中已按现口径换算</span>'
               if stale_n else '')

@@ -174,6 +174,12 @@ _SPOT = d.get("spot_held") or {}
 # 金额是「按当前目标收窄推出来的」而不是成交记录：这几行必须标「推定」。
 # 不标的话，一个看起来精确的假数字比一个明确标注的估计值危险得多。
 _EST = set(d.get("spot_est") or [])
+# ---- 永续层：台账里 done 的开仓 − 平仓 ----
+# 这个块讲的是「现货底仓」，但账户里一旦有永续仓，只报现货就是在少报一半敞口。
+# 2026-11-27 开出第一笔 LINK 永续（40 U）之后，「实盘现货 +0.50×」这句话
+# 就再也不等于账户状态了 —— 而看的人只会读成「我的敞口是 0.50×」。
+# **文本在算完 _ssum 之后才拼**（它要用到现货合计），别在这里提前拼。
+_PN = TK.perp_net()
 if _SPOT:
     _srows = ""
     _ssum = 0.0
@@ -205,6 +211,17 @@ if _SPOT:
     # 不写这句，看到「11 个币只有 7 个有货」会以为漏买了。
     # （币数会随组合调整而变 —— 2026-11-27 去 DOGE 后是 11，别再写死这个数。）
     _flat = [o["c"] for o in COINS if not _SPOT.get(o["c"]) and o["state"] == "DOWN"]
+    _PN_TXT = (
+        f'<br><b>永续层</b>（台账 done 的开仓 − 平仓）：净 <b>{_PN["net"]:+,.0f} U</b>'
+        f'（{_PN["n"]} 笔，毛 {_PN["gross"]:,.0f} U）'
+        f'　⇒　<b>实盘合计敞口 {_ssum + _PN["net"]:,.0f} U'
+        f'（净 {(_ssum + _PN["net"]) / (_CAP or 1):+.2f}×）</b>'
+        if _PN["n"] else "")
+    _PN_WARN = (
+        f'<br><span style="color:{MU}">上面是<b>名义</b>，不是权益：合约账户里的余额'
+        f'（保证金 + 闲置）台账里没有记录，权益只能看交易所。'
+        f'现货和永续用的是同一个本金池，相加不是「多出来的钱」。</span>'
+        if _PN["n"] else "")
     spot_block = (
         f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">'
         f'现货底仓（{len(_SPOT)} 个 · {_ssum:,.0f} U）</h2>'
@@ -222,10 +239,12 @@ if _SPOT:
         f'下单后执行 <code>ticket.py fill &lt;编号&gt; &lt;成交额U&gt;</code> 补录，标记即消失。'
         f'<br><b>「差额」为负 = 超配</b>：底仓只在「日线翻 DOWN」或「RANGE 系数为 0」时'
         f'才自动清，<b>策略不会为超配生成减仓工单</b> —— 这几种差额要按目标手动减。'
+        + (_PN_TXT) + (_PN_WARN)
         + (f'<br><b>两个净敞口不要混用</b>：策略书 '
            f'{sum(o.get("target") or 0 for o in COINS) / (_CAP or 1):+.2f}×'
            f'（含未建仓空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'
-           f'风控看后者，判断策略状态看前者。'
+           + ('风控看上面的<b>合计</b>（现货 + 永续），判断策略状态看前者。'
+              if _PN["n"] else '风控看后者，判断策略状态看前者。')
            if (UNOPENED or not EXEC_SHORT) else '')
         + (f'<br>{"/".join(_flat)} 日线为 DOWN 且无现货底仓 —— 规则要求的持仓状态'
            f'（空头是永续层的事，与现货底仓无关）。'
