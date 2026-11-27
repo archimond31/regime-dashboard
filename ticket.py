@@ -25,6 +25,8 @@ TTL 的取值依据是 _diag_delay.py 的实测：开仓信号每延迟 4 小时
     python ticket.py done 3 80255.5  # 标记 3 号已执行，记下成交价
     python ticket.py done all        # 全部标记已执行
     python ticket.py drop 3          # 明确放弃 3 号
+    python ticket.py fill 7 136      # 补录实际成交额（不改状态，只补事实）
+    python ticket.py adopt BTC 199 空  # 账户里已有这笔仓、台账里没有 → 补进台账
     python ticket.py stats           # 实测「建单到结算」的延迟分布 + 折算 R 损失
 """
 import datetime as dt
@@ -457,6 +459,54 @@ def mark_notified(ids):
     return hit
 
 
+def _expect(i, CUR):
+    """「这张单若按**此刻**的信号重算，金额该是多少」。
+
+    == 为什么这个函数必须存在，而且必须复用 _notional ==
+    它的用途是**发现工单金额过时**（改本金、波动目标化系数变了）。判据是
+    「拿台账里的旧 notional 跟现在的口径比」，所以「现在的口径」必须与
+    **建单时的口径**是同一个函数 —— 否则它比的不是「时间差」，是「两套公式」。
+
+    2026-11-27 的实例：`_notional` 改成「永续只承担加仓层」之后，这里还留着
+    自己的一套 `capital*w*(BASE+ADD)`：
+      · #20 LINK 开仓真实金额 40 U → 这里算成 122 U → 差值 82 > 阈值
+        → 邮件把主数字印成「买入 122 U」，40 U 缩成小字「⚠ 原单已换算」
+        → **刚在 _notional 里修掉的 66% 多买，被显示层原样搬了回来**。
+      · 平仓类同向错 3 倍（LINK 应平 40 U，这里算出 120 U）。
+    「同一件事两处各算一遍」必然分叉 —— 这是本项目第四次踩同一条
+    （前三次：SPOT 与策略书净敞口、live_signals 与 ticket 各判一遍建底仓、
+    market_close_hour 收盘时钟）。分叉的代价都是**静默**的：数字不会报错。
+
+    口径细节：**四类动作都原样交给 _notional，不做任何参数修饰**。
+    特别是建底仓的 order_amount（「这一轮还差多少」）必须保留 —— 它才是
+    同口径的比较对象。拿 target（「这一段该持有多少」）去比一张补仓单，
+    28 U 的差额单会被显示成 282 U 的全额买入，人照着买就是超配 10 倍。
+    这类错的方向性很重要：**高估建仓金额比低估危险得多**。
+    """
+    c = CUR.get(i["coin"])
+    if not c:
+        return None                     # 该币已不在信号里（比如刚被移出组合）
+    return _notional(dict(c, action=i["kind"]))
+
+
+def _disp_amount(i, CUR):
+    """表格里显示的那个金额：返回 (金额, 换算法由 or None)。
+
+    **「显示什么」和「复制走什么」必须是同一个数**。邮件末尾那几行
+    `python fill_log.py add ...` 是直接抄去下单的 —— 表格印 40、命令带 122，
+    比两个都错还糟（人会以为自己抄对了）。
+    """
+    ref = _expect(i, CUR)
+    why = "系数/闸门已变" if i["kind"] in ("开仓", "建底仓") else "本金已变"
+    # 老单没存 cap 字段；存了的就能确指「这是按 5000 生成的」
+    if i.get("cap") and abs(i["cap"] - PC.CAPITAL) > 1.0:
+        why = f"按 {i['cap']:,.0f} U 本金生成"
+    if (ref is not None and i["notional"]
+            and abs(ref - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
+        return ref, why
+    return i["notional"], None
+
+
 def _cur_sig():
     """当前 _signal.json 的逐币快照 —— 用来发现「工单金额已过时」。
 
@@ -485,18 +535,6 @@ def render():
                 '<b>没有待执行工单。</b>上一批动作都已结算。</div>')
     CUR, SIG_CAP, SPOT = _cur_sig()
 
-    # 平仓/清底仓的金额该是多少 —— 口径和建仓类**不一样**，不能拿 target 比。
-    # 两类都按「现在的本金」重算：改本金后这里是唯一能发现「多平 2.5 倍」的地方。
-    def _expect(i):
-        w = PC.WEIGHTS.get(i["coin"], 0.0)
-        if i["kind"] == "清底仓":
-            bh = (CUR.get(i["coin"]) or {}).get("base_held")
-            return bh if bh else PC.CAPITAL * w * PC.BASE_RATIO
-        if i["kind"] in ("平仓", "止损临近", "即将到期"):
-            k = (PC.BASE_RATIO + PC.ADD_RATIO) if i.get("regime") == "UP" else PC.ADD_RATIO
-            return PC.CAPITAL * w * k
-        return None
-
     rows = ""
     buy_sum = sell_sum = 0.0
     stale_n = 0        # 有多少张单的原始金额已过时（需要换算）
@@ -519,24 +557,14 @@ def render():
         else:
             age_sub = ""
         sgn = "买入" if i["side"] > 0 else "卖出"
-        # 建仓类比「现信号建议名义」；平仓/清底仓比「按现本金该平多少」。
-        # 两者是不同的问题，混用会误导（target 是建议开多大，notional 是要平多少）。
-        cur = (CUR.get(i["coin"]) or {}).get("target")
-        if i["kind"] in ("开仓", "建底仓"):
-            ref, why = cur, "系数/闸门已变"
-        else:
-            ref, why = _expect(i), "本金已变"
-        # 老单没存 cap 字段；存了的就能确指「这是按 5000 生成的」
-        if i.get("cap") and abs(i["cap"] - PC.CAPITAL) > 1.0:
-            why = f"按 {i['cap']:,.0f} U 本金生成"
+        # 「现在的口径」只能有一个来源 —— 直接问 _notional（见 _expect 的注释）。
+        # 曾经这里对建仓类拿 target、对平仓类自己算 1.5×，两套公式都和 _notional 分叉过。
+        disp, why = _disp_amount(i, CUR)
         drift = ""
         # 主数字用**现口径**：这封邮件是拿来下单的。主数字写 477、小字写「现口径 200」，
         # 等于让最容易被误读的那个数占主导 —— 5000→2000 那次就是这么下错的风险。
         # 台账里的 notional 仍保留建单时的原值（它是历史记录，不该被改写）。
-        disp = i["notional"]
-        if (ref is not None and i["notional"]
-                and abs(ref - i["notional"]) > max(20.0, 0.05 * abs(i["notional"]))):
-            disp = ref
+        if why:
             drift = (f'<div style="font-size:11px;color:#ef6c00;margin-top:2px">'
                      f'⚠ 原单 {i["notional"]:,.0f} U（{why}，已换算）</div>')
             stale_n += 1
@@ -585,7 +613,10 @@ def render():
 
     cmd = ""
     for i in op[:4]:
-        cmd += (f"python fill_log.py add {i['coin']} {i['side']:+d} {i['notional']} "
+        # 用 _disp_amount 而不是 i["notional"]：这行是**照抄去下单**的，
+        # 必须与表格里的主数字一致（表格已换算、命令抄旧值 = 照过期数字成交）。
+        _amt = _disp_amount(i, CUR)[0]
+        cmd += (f"python fill_log.py add {i['coin']} {i['side']:+d} {_amt:,.0f} "
                 f"{i['ref_px']} &lt;成交均价&gt;\n")
     ex_n = sum(1 for i in op if expired(i))
     # 本金条：这行以前没有，导致「邮件里到底按多少钱算的」只能从金额反推。
@@ -812,6 +843,102 @@ def set_fill(ids, amount, px=None):
     return hit
 
 
+def adopt(coin, amount, side=None, px=None, force=False):
+    """把「账户里**已经存在**的仓位」补进台账。只在真的持有那笔仓时用。
+
+    == 为什么必须有这个入口（一个静默失败模式）==
+    `has_pos` 只能从台账里 status=done 的「开仓」记录推出来
+    （live_signals.short_opened → PC.executable）。也就是说：
+    **只要那笔仓不是靠本系统的工单开的，系统就永远不知道它在。**
+    后果不是报错，而是**从此不再发任何平仓 / 止损单** —— 一整笔敞口无人看管，
+    页面上还标着「未建仓」，看起来像「本来就没有这笔仓」，一切正常。这正是
+    这个项目反复出现的同一类病：错的不是数字，是「没算」。
+
+    两类真实场景：
+      · BTC / ETH / BNB 11-09 那三笔空头 —— 系统 11-24 才上线，从未下过单；
+      · 你手动开的仓 —— 合约账户在手，看到信号直接下了，没走工单。
+
+    补一条 status=done 的「开仓」即可，两个下游同时打通：
+      · short_opened() → has_pos=True → 平仓 / 止损开始发单；
+      · _opened_amount() → 平仓金额用**你填的实际金额**，不用今日 scale 重算。
+        重算必漂：VT 系数每 7 天重算一次，拿今天的 scale 去平一个月前的仓，
+        平出来就不是原仓位了（多平 = 反向开仓）。
+
+    != 纸面 !=
+    这条记录写的是**事实**，不是意图。金额没填对，平仓就会对着一个不存在的
+    仓位下单 —— 例如把不存在的 199 U 空头「平掉」，实际是开出 199 U 多单。
+    所以宁可拒收，也不给默认值。
+
+    side: +1 多 / -1 空。不给就按当前信号推：target<0 → 空，否则多。
+    """
+    try:
+        amount = abs(float(amount))
+    except Exception:
+        print("金额要是数字（U）。")
+        return 1
+    if amount <= 0:
+        print("金额要大于 0。")
+        return 1
+    try:
+        raw = json.load(open(SIG, encoding="utf-8"))
+    except Exception:
+        raw = {}
+    c = {o["c"]: o for o in raw.get("coins", [])}.get(coin)
+    bar = raw.get("bar4h") or ""
+    if c is None:
+        print(f"  ⚠ {coin} 不在当前信号里 —— 补进去也不会再有它的平仓单。")
+    if side is None:
+        side = -1 if (c and (c.get("target") or 0) < 0) else 1
+    side = -1 if side < 0 else 1
+
+    d = load()
+    if not force:
+        prev = [i for i in d["items"] if i["coin"] == coin
+                and i["kind"] == "开仓" and i["status"] == "done"]
+        if prev:
+            last = prev[-1]
+            got = last.get("fill_notional")
+            got = got if got is not None else last.get("notional")
+            print(f"  {coin} 已有 {len(prev)} 张已执行「开仓」（最近 #{last['id']} "
+                  f"{float(got or 0):,.0f} U）。")
+            print("  平仓金额依据的是**最近**这一张，再补一条会把它换掉。"
+                  "确认要补就加 --force。")
+            return 1
+
+    it = {
+        "id": d["next_id"],
+        "key": f'{coin}|开仓|{(c or {}).get("regime_start") or bar}',
+        "coin": coin, "kind": "开仓", "side": side,
+        "notional": round(amount), "cap": PC.CAPITAL,
+        "ref_px": px if px is not None else (c or {}).get("px"),
+        "stop": None,
+        "state": (c or {}).get("state"),
+        "pos_side": 0,
+        "regime_start": (c or {}).get("regime_start"),
+        "bar": bar, "created": bar, "age_bars": 0,
+        "slices": 1, "cap_flag": "",
+        "note": ("手工补录：这笔仓在账户里已存在（不是本系统工单开的），"
+                 "平仓金额以它为准"),
+        "status": "done",
+        "settled_at": dt.datetime.now(dt.timezone.utc).strftime(BAR_FMT) + " UTC",
+        "fill_px": px,
+        "fill_notional": round(amount),
+        "void_note": None,
+        "notified": True,          # 补录的历史仓不需要再提醒一次
+    }
+    d["next_id"] += 1
+    d["items"].append(it)
+    save(d)
+    print(f"  #{it['id']} {coin} 已补录为 {('多' if side > 0 else '空')}头 {round(amount):,.0f} U"
+          f"（status=done）")
+    if side < 0:
+        print("  → 该币 has_pos 变 True：平仓 / 止损单从此会发，金额按这 "
+              f"{round(amount):,.0f} U 回推。")
+    else:
+        print("  → 该币最近一张已执行「开仓」换成这一条，平仓金额按它回推。")
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     if not argv:
@@ -833,6 +960,22 @@ def main():
         px = float(rest[2]) if len(rest) > 2 else None
         set_fill(ids, float(rest[1]), px)
         return 0
+    if cmd == "adopt":
+        # 账户里已有的仓补进台账：adopt <币> <金额U> [多|空] [入场价]
+        if len(rest) < 2:
+            print("用法：adopt <币> <金额U> [多|空] [入场价] [--force]")
+            return 1
+        sd = None
+        if len(rest) > 2 and rest[2] in ("多", "空", "long", "short"):
+            sd = 1 if rest[2] in ("多", "long") else -1
+        px = None
+        for x in rest[2:]:
+            try:
+                px = float(x)
+                break
+            except Exception:
+                continue
+        return adopt(rest[0].upper(), rest[1], sd, px, "--force" in argv)
     if cmd == "list":
         d = load()
         op = _open_items(d)

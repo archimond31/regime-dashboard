@@ -90,6 +90,67 @@ case("建底仓 回落到 target", dict(coin(action="建底仓")), [], 122)
 case("清底仓 = base_held", dict(coin(action="清底仓", base_held=82)), [], 82)
 
 
+def done_open_short(notional):
+    d = done_open(notional)
+    d.update({"coin": "BTC", "key": "BTC|开仓|2026-10-25", "side": -1,
+              "notional": notional, "fill_notional": notional})
+    return d
+
+
+# 8) 平仓·空：用当时实际开了多少
+#    空头的 target 本身等于加仓层（DOWN 段底仓为 0），所以这里不该出现「减 base_held」
+#    以外的任何差；真正要守的是**别拿今天的 scale 重算**。
+case("[空]平仓 用已执行额 199",
+     dict(coin(c="BTC", state="DOWN", target=-199, base_held=398,
+               pos={"side": -1, "regime": "DOWN"}), action="平仓"),
+     [done_open_short(199)], 199)
+
+
+# ---- 守卫：空头没建过仓时，平仓单**根本不该被生成** ----
+# BTC/ETH/BNB 11-09 那三笔是「未建仓」（系统 11-24 才上线）。
+# 它们的 平仓/止损 若走到 _notional，会算出一个金额去平一个不存在的仓 ——
+# 所以第一道闸在 PC.executable，不在 _notional。这里把这道闸钉住。
+GUARDS = [
+    ("[空]无建仓记录 → 不发平仓单", False, PC.executable("平仓", -1, -1, False)),
+    ("[空]无建仓记录 → 不发止损单", False, PC.executable("止损临近", -1, -1, False)),
+    ("[空]有建仓记录 → 照发", True, PC.executable("平仓", -1, -1, True)),
+    ("[空]新空头 → 照发（pos=0）", True, PC.executable("开仓", -1, 0, True)),
+]
+
+
+# ---- 补录（adopt）：账户里有、台账里没有 ----
+# 这是 8) 的前提：不补录，_opened_amount 恒为 None，空头的平仓金额只能靠今日
+# scale 重算 —— 而 VT 系数每 7 天变一次，平出来就不是原仓位。
+def adopt_case():
+    set_ledger([])
+    rc = ticket.adopt("BTC", 199, side=-1)
+    return rc, ticket._opened_amount("BTC"), ticket._opened_amount("ETH")
+
+
+# ---- 显示层：_expect/_disp_amount 必须与 _notional 同源 ----
+# 2026-11-27：render() 里原来自己算 capital*w*(BASE+ADD)，
+# #20 LINK 开仓 40 U 会被显示成「买入 122 U」并把 40 标成「已换算」——
+# 刚在 _notional 修掉的 66% 多买，被显示层原样搬回来。
+def display_case():
+    set_ledger([done_open(40)])
+    item = {"coin": "LINK", "kind": "开仓", "notional": 40,
+            "cap": PC.CAPITAL, "regime": "UP", "side": 1}
+    return ticket._disp_amount(item, {"LINK": coin()})
+
+
+def display_base_case():
+    """建底仓的补仓单（差额 28）不能被显示成全额 282。
+
+    这是 _expect 里最危险的一条：拿 target 当基准，一张「再补 28 U」的单
+    会显示成「买入 282 U」。方向上高估建仓 10 倍，比少买危险得多。
+    """
+    set_ledger([])
+    item = {"coin": "XRP", "kind": "建底仓", "notional": 28,
+            "cap": PC.CAPITAL, "regime": "UP", "side": 1}
+    cur = {"XRP": coin(c="XRP", target=282, base_held=282, order_amount=28)}
+    return ticket._disp_amount(item, cur)
+
+
 def main():
     bad = 0
     print(f"{'情形':<26}{'期望':>7}{'实际':>7}  判定")
@@ -99,10 +160,36 @@ def main():
         bad += 0 if ok else 1
         print(f"{name:<26}{want:>7}{got:>7}  {'✓' if ok else '✗'}")
     print("-" * 54)
+    rc, btc, eth = adopt_case()
+    for name, want, got in [("补录后 → BTC 199", 199, btc),
+                            ("补录后 → ETH 无记录", None, eth),
+                            ("补录返回码 0", 0, rc)]:
+        ok = want == got
+        bad += 0 if ok else 1
+        print(f"{name:<26}{str(want):>7}{str(got):>7}  {'✓' if ok else '✗'}")
+    got = display_case()
+    for name, want, g in [("显示层金额与 _notional 同源", 40, got[0]),
+                          ("显示层不标「已换算」", None, got[1])]:
+        ok = want == g
+        bad += 0 if ok else 1
+        print(f"{name:<26}{str(want):>7}{str(g):>7}  {'✓' if ok else '✗'}")
+    got = display_base_case()
+    for name, want, g in [("建底仓补仓单不被放大", 28, got[0]),
+                          ("建底仓补仓单不标「已换算」", None, got[1])]:
+        ok = want == g
+        bad += 0 if ok else 1
+        print(f"{name:<26}{str(want):>7}{str(g):>7}  {'✓' if ok else '✗'}")
+    print("-" * 54)
+    for name, want, got in GUARDS:
+        ok = want == got
+        bad += 0 if ok else 1
+        print(f"{name:<26}{str(want):>7}{str(got):>7}  {'✓' if ok else '✗'}")
+    print("-" * 54)
     if bad:
         print(f"✗ {bad} 项不符 —— 工单金额口径被改坏了，别拿去下单")
         return 1
-    print("✓ 七项全过：永续只算加仓层，底仓不重复买、平仓不卖成反向仓")
+    print("✓ 全过：永续只算加仓层；空头没建仓不发平仓单；补录后按实际额平；"
+          "显示层与 _notional 同源")
     return 0
 
 
