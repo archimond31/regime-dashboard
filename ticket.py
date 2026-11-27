@@ -91,11 +91,34 @@ def _bars_between(a, b):
 
 
 # ---------------- 建单 ----------------
+def _opened_amount(coin):
+    """该币最近一张**已执行**「开仓」单的金额。平仓按它回推，不用今天的权重重算。"""
+    try:
+        d = load()
+    except Exception:
+        return None
+    for i in reversed(d.get("items", [])):
+        if i.get("coin") == coin and i.get("kind") == "开仓" and i.get("status") == "done":
+            amt = i.get("fill_notional")
+            amt = abs(float(amt)) if amt is not None else abs(float(i.get("notional") or 0))
+            if amt > 0:
+                return amt
+    return None
+
+
 def _notional(o):
-    """这张工单要动的名义金额（U）。
+    """这张工单要动的名义金额（U）。**这是「这一单要交易多少」，不是「这个币该有多少」。**
+
+    2026-11-27 订正（用户指出有合约账户后才发现这条必须改）：
+      底仓 1.0× 走**现货**，加仓层 0.5× 走**永续**（portfolio_config: ADD_RATIO 注释
+      「突破后追加（多头叠加 / 空头唯一来源）」）。所以永续这条腿在多头里**只承担
+      加仓层**，而 `target` 是「峰值 = 底仓 + 加仓层」。
+      旧写法直接拿 target 当开仓金额 → 把底仓在永续上又买了一遍：
+        LINK 82 U 已在现货，开仓单还写 122 U → 执行后 204 U = 本金 10.2%（2.5× 权重），
+        而策略峰值是 1.5× 权重 = 123 U。**多买 66%。**
+      空头没有这个问题：DOWN 段底仓本来就是 0，`target` 就等于加仓层。
 
     不能一律用 target：日线翻转时 target 被强制归零，反而拿不到「要平多少」。
-    平仓类回到持仓口径推：UP 里的仓是 base+add=1.5×，DOWN 里的空头只有 add=0.5×。
     """
     w = PC.WEIGHTS.get(o["c"], 0.0)
     a = o["action"]
@@ -116,10 +139,24 @@ def _notional(o):
         # 卖多少 = **手上真实持有**的底仓。信号里的 base_held 已按上一轮的闸门打过折，
         # 不能拿全额去平 —— 闸门在仓时那是超卖。
         return round(o.get("base_held") or PC.CAPITAL * w * PC.BASE_RATIO)
+    if a == "开仓":
+        t = o.get("target") or 0
+        if t > 0:
+            # 多头：峰值 − 底仓 = 加仓层。底仓在现货，另有建底仓单，不能重复买。
+            base = float(o.get("base_held") or 0)
+            return round(max(0.0, abs(t) - base))
+        return round(abs(t))          # 空头：整个仓就是加仓层，不减
     if a in ("平仓", "止损临近", "即将到期"):
-        p = o.get("pos") or {}
-        k = (PC.BASE_RATIO + PC.ADD_RATIO) if p.get("regime") == "UP" else PC.ADD_RATIO
-        return round(PC.CAPITAL * w * k)
+        # 平的是**永续那条腿**，所以口径是加仓层，不是 1.5×。
+        # 旧写法对多头用 (BASE+ADD)=1.5× → LINK 算出 120 U，而实际只开了 41 U，
+        # 照它平会在永续上卖成 79 U 的净空头。
+        # 优先用「当时实际开了多少」，那是唯一不会漂的口径（VT 系数每天都在变）；
+        # 没执行记录时才回落到今天的权重重算。
+        n = _opened_amount(o["c"])
+        if n:
+            return round(n)
+        sc = (o.get("vt") or {}).get("scale") or 1.0
+        return round(PC.CAPITAL * w * PC.ADD_RATIO * sc)
     return abs(o.get("target") or 0)
 
 

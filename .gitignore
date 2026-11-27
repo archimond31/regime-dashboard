@@ -302,3 +302,7 @@ holding_*.png
 # 工单去重口径的回归检查（2026-11-27）：4H 层只挡 done/open，现货一段一次。
 # ticket.sync 的注释直接引用它的七种情形，不入库则那条规则无法复核。
 !_verify_ticket_dedup.py
+
+# 工单金额口径的回归检查（2026-11-27）：永续那条腿只算加仓层，底仓在现货。
+# 开仓·多曾直接把 target（峰值）当金额，把底仓在永续上又买一遍（LINK 122 vs 应有 40）。
+!_verify_ticket_size.py
