@@ -404,7 +404,7 @@ def spot_held(cur_tgt=None, pending=True):
     建底仓/清底仓单及其结算状态，这就是现货仓位的完整历史。
 
     口径：
-      · 已结算(done)的建底仓 − 已结算(done)的清底仓；
+      · 已结算(done)的建底仓 − 已结算(done)的清底仓 − 已结算(done)的减底仓；
       · 金额优先取 `fill_notional`（实际成交额），没有才退回 `notional`（建单建议额）；
       · 该币只有未结算的建底仓 → 看 pending 参数（见下）；
       · 从没建过 → 0（不出现在返回里）。
@@ -435,7 +435,11 @@ def spot_held(cur_tgt=None, pending=True):
         return held
     for i in d.get("items", []):
         k = i.get("coin")
-        if not k or i.get("kind") not in ("建底仓", "清底仓"):
+        # **减底仓必须算进来。** 漏掉它的后果不是数字偏一点，而是死循环：
+        # 减仓单执行完（done）之后，这里仍按 300 算持有，而 ticket._held_from_ledger
+        # 已经按 141 算了 → live_signals 认为还超配、继续发减仓单，永不收敛。
+        # 这是本项目第六次「同一件事两处各算一遍」，前五次全是静默分叉。
+        if not k or i.get("kind") not in ("建底仓", "清底仓", "减底仓"):
             continue
         # 先按状态过滤，再算金额。顺序反了会把 void/drop 的旧单也算进「推定」——
         # XRP 有一张 void 的 560 U 建仓单，它一旦参与计算，XRP 就会被误标「推定」，
@@ -456,17 +460,24 @@ def spot_held(cur_tgt=None, pending=True):
             amt = abs(float(fn))
         else:
             amt = abs(i.get("notional") or 0)
-            t = cur_tgt.get(k)
-            # 只在「建议额明显高于当前目标」时才收窄并标记。差额不到 5%、也不到 20 U
-            # 的属于取整噪声（VT 系数或权重微调），既不该改数，也不该打推定标 ——
-            # 把 1 U 的差都标成「推定」，等于让标记失去信息量。
-            if t is not None and t > 0 and amt - t > max(20.0, 0.05 * amt):
-                amt = t
-                est.add(k)
+            # 收窄**只对建底仓**成立。减底仓的 notional 本身就是「多出来的差额」，
+            # 拿当前目标去收窄会把它压成目标值（减 300 被读成 141），
+            # 等于把「要卖多少」换成「该持有多少」，方向完全错了。
+            # 清底仓从来不该收窄（它卖的是手上全额，与目标无关）。
+            if i.get("kind") == "建底仓":
+                t = cur_tgt.get(k)
+                # 只在「建议额明显高于当前目标」时才收窄并标记。差额不到 5%、也不到 20 U
+                # 的属于取整噪声（VT 系数或权重微调），既不该改数，也不该打推定标 ——
+                # 把 1 U 的差都标成「推定」，等于让标记失去信息量。
+                if t is not None and t > 0 and amt - t > max(20.0, 0.05 * amt):
+                    amt = t
+                    est.add(k)
         sgn = 1 if i.get("kind") == "建底仓" else -1
         if i.get("status") == "done":
             held[k] = held.get(k, 0.0) + sgn * amt
         elif pending and i.get("status") == "open" and sgn > 0:
+            # 未结算的**减底仓**不能当成「已经减了」—— sgn < 0 自然落在这里外面，
+            # 所以「手上有多少」在减仓单执行前保持不变，这是对的。
             held[k] = max(held.get(k, 0.0), amt)
     _EST.clear()
     _EST.update({k for k in est if k in held})
@@ -620,40 +631,63 @@ def main():
                 note = (f"日线 {rs} 起为 RANGE（来路 {o.get('range_src')}），"
                         f"按规则底仓归零，撤掉现货 {amt} U")
             else:
-                act = "建底仓"
+                # 「该持有」取 target 而不是 base_held 全额：target 多含了
+                # **RANGE 来路系数**（rr），base_held 只含 VT scale 与底仓闸门。
+                # 2026-11-27 之前两者在实盘恒等（每币都正好在目标上，分支早被
+                # `delta <= 0` 挡掉），所以这个区别看不出来；权重从 9.2% 抬到
+                # 10.22% 后 SOL 是 RANGE(来路 DOWN)：base_held 282 / target 141，
+                # 拿 base_held 去算会让人多买一倍。
+                #
+                # **不要写回 o["target"]**：2026-11-27 之前这里写的是
+                # `o["target"] = delta`，把「该持有多少」覆盖成了「这一单买多少」。
+                # 后果是页面「该持有」列变成单笔金额、spot_held 的收窄基准也跟着错
+                # （XRP 真实持有 254 U，被显示成 28 U）。差额走独立字段。
+                hld = round(o.get("target") or amt)
+                delta = hld - round(real)
+                if abs(delta) < PC.min_order_value(o["c"]):
+                    continue
                 gtail = ("" if bg >= 1.0
-                         else f"（价格已在 MA{BG.GATE_MA} 下方，只建 {round(bg * 100)}%）")
+                         else f"（价格已在 MA{BG.GATE_MA} 下方，建仓只给 {round(bg * 100)}%）")
                 rtail = ("" if rr >= 1.0
-                         else f"（来路 {o.get('range_src')}，只建 {round(rr * 100)}%）")
-                if real > 0:
-                    # 手上已有的不重复买。base_held 是「该持有多少」，
-                    # 差额才是这一单要买的。缺了这一步，UP→RANGE 会让
-                    # regime_start 变化 → 再发一张全额建仓单 → 同一份底仓买两遍。
-                    #
-                    # 「该持有」取 target 而不是 base_held 全额：target 多含了
-                    # **RANGE 来路系数**（rr），base_held 只含 VT scale 与底仓闸门。
-                    # 2026-11-27 之前两者在实盘恒等（每币都正好在目标上，分支早被
-                    # `delta <= 0` 挡掉），所以这个区别看不出来；权重从 9.2% 抬到
-                    # 10.22% 后 SOL 是 RANGE(来路 DOWN)：base_held 282 / target 141，
-                    # 拿 base_held 去算会让人多买一倍。
-                    delta = round(o.get("target") or amt) - round(real)
-                    if delta <= 0 or delta < PC.min_order_value(o["c"]):
-                        continue
-                    note = (f"日线 {rs} 起为 {st}，底仓应在场 {round(o.get('target') or amt)} U；"
-                            f"已持有 {round(real)} U，本单补 {delta} U"
-                            f"{gtail}{rtail}（4H 突破后再加到峰值）")
+                         else f"（来路 {o.get('range_src')}，只给 {round(rr * 100)}%）")
+                if delta > 0:
+                    act = "建底仓"
                     amt = delta
-                    # **不要写回 o["target"]**：2026-11-27 之前这里写的是
-                    # `o["target"] = delta`，把「该持有多少」覆盖成了「这一单买多少」。
-                    # 后果是页面「该持有」列变成单笔金额、spot_held 的收窄基准也跟着错
-                    # （XRP 真实持有 254 U，被显示成 28 U）。差额走独立字段。
                     o["order_amount"] = delta
+                    if real > 0:
+                        # 手上已有的不重复买。base_held 是「该持有多少」，
+                        # 差额才是这一单要买的。缺了这一步，UP→RANGE 会让
+                        # regime_start 变化 → 再发一张全额建仓单 → 同一份底仓买两遍。
+                        note = (f"日线 {rs} 起为 {st}，底仓应在场 {hld} U；"
+                                f"已持有 {round(real)} U，本单补 {delta} U"
+                                f"{gtail}{rtail}（4H 突破后再加到峰值）")
+                    else:
+                        # 手上是空的：建多少 = target（含 rr），不是 base_held 全额。
+                        note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
+                                f"{gtail}{rtail}（4H 突破后再加到峰值）")
                 else:
-                    # 手上是空的：建多少 = target（含 rr），不是 base_held 全额。
-                    amt = round(o.get("target") or amt)
+                    # ---- 减底仓（2026-11-27 新增）----
+                    # 走到这里说明「该持有」比手上少。最常见的是 UP→RANGE(来路 DOWN)：
+                    # rr 从 1.0 掉到 0.5，target 腰斩，而手上还是全额。
+                    #
+                    # 为什么必须减、而不是「建过就算了」：
+                    #   1) 回测 bt_skeleton.base_series() 是**逐 bar** 返回系数的，
+                    #      RANGE 段一进入就按 0.5 算净值。实盘不减 = 跑的是 1.0 档，
+                    #      那份 291 万 / −54.9% / Calmar 1.29 就不适用于实际持仓 ——
+                    #      风控读数和预期收益全部失效，而这**不会有任何报错**。
+                    #   2) 结构上这是唯一一处单边缺口：建底仓有分支、清底仓有分支，
+                    #      唯独「目标变小、要卖一半」没有，`delta <= 0` 直接 continue。
+                    #
+                    # 【收益上的理由很弱，别拿它当动机】来路 DOWN 的 RANGE 段 185 段里
+                    #   41% 五个交易日内就结束，减了要马上买回：摩擦约 0.85%/年，
+                    #   而不减的 beta 成本约 1.08%/年 —— 净差 0.23pp，几乎打平。
+                    #   这条改动的正当性是**口径一致**，不是多赚。
+                    act = "减底仓"
+                    amt = min(-delta, round(real))   # 不能卖超过手上真有的
                     o["order_amount"] = amt
-                    note = (f"日线 {rs} 起为 {st}，底仓 {amt} U 应在场"
-                            f"{gtail}{rtail}（4H 突破后再加到峰值）")
+                    note = (f"日线 {rs} 起为 {st}，底仓应在场 {hld} U；"
+                            f"已持有 {round(real)} U，超配 {amt} U 减回"
+                            f"{rtail}（现货卖出，无价格止损）")
         else:
             continue                      # 已触发 = action 已是「开仓」，不重复
         # 去重键必须带 rr：系数从 1.0 调到 0.5 时底仓金额跟着变，
@@ -677,7 +711,7 @@ def main():
         astr = f"空 {abs(amt):,.0f}" if amt < 0 else f"{amt:,.0f}"
         print(f"  {r['c']:<5} {r['state']:<6} {r['action']:<8}{astr:>10} U  {r['note']}")
 
-    _ACT = ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")
+    _ACT = ("开仓", "平仓", "清底仓", "建底仓", "减底仓", "止损临近", "即将到期")
     # 分成两组，不能混：urgent 会变成工单，paper 只进策略书。
     # 「需要动作 N 个」如果连纸面空头也数进去，等于每封信都在叫醒你去做不会做的事。
     urgent = [o for o in rows if o["action"] in _ACT and o.get("exec", True)

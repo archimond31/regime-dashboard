@@ -49,12 +49,15 @@ TTL = {
     "即将到期": 6,
     "清底仓": 24,     # 日线级，无硬时效，只防「忘了」
     "建底仓": 24,
+    "减底仓": 24,     # 同上。语义是「目标变小了，卖掉多出来的那部分」
 }
 LAB = {"开仓": "开仓", "平仓": "平仓", "止损临近": "止损临近",
-       "即将到期": "即将到期", "清底仓": "清底仓（现货卖出）",
-       "建底仓": "建底仓（现货买入）"}
+       "即将到期": "即将到期", "清底仓": "清底仓（现货卖出·全部）",
+       "建底仓": "建底仓（现货买入）",
+       "减底仓": "减底仓（现货卖出·部分）"}
 COLOR = {"开仓": "#c62828", "平仓": "#2e7d32", "止损临近": "#ef6c00",
-         "即将到期": "#6a1b9a", "清底仓": "#d84315", "建底仓": "#1565c0"}
+         "即将到期": "#6a1b9a", "清底仓": "#d84315", "建底仓": "#1565c0",
+         "减底仓": "#e65100"}
 BAR_FMT = "%Y-%m-%d %H:%M"
 ATR_K = 1.5      # 与 bt_skeleton.ATR_K 一致：止损 = 入场 ∓ 1.5×ATR(14)
 # 当前模式，印在邮件资金条上 —— 「这封邮件按什么口径算的」是会变的，
@@ -141,6 +144,14 @@ def _notional(o):
         # 卖多少 = **手上真实持有**的底仓。信号里的 base_held 已按上一轮的闸门打过折，
         # 不能拿全额去平 —— 闸门在仓时那是超卖。
         return round(o.get("base_held") or PC.CAPITAL * w * PC.BASE_RATIO)
+    if a == "减底仓":
+        # 卖多少 = 这一次要减掉的差额（order_amount，live_signals 用「已持有 − 目标」算好）。
+        # 和「清底仓」的区别就在这里：清底仓是「手上全清」，减底仓是「只减多出来的部分」。
+        # 没有 order_amount 时回落到 base_held − target（全额底仓 − 打折后目标）。
+        oa = o.get("order_amount")
+        if oa is not None and oa > 0:
+            return round(oa)
+        return round(max(0.0, (o.get("base_held") or 0) - abs(o.get("target") or 0)))
     if a == "开仓":
         t = o.get("target") or 0
         if t > 0:
@@ -163,9 +174,9 @@ def _notional(o):
 
 
 def _side(o):
-    """+1 买 / -1 卖。清底仓、平多 = 卖；建底仓、平空 = 买。"""
+    """+1 买 / -1 卖。清底仓、减底仓、平多 = 卖；建底仓、平空 = 买。"""
     a = o["action"]
-    if a == "清底仓":
+    if a in ("清底仓", "减底仓"):
         return -1
     if a == "建底仓":
         return 1
@@ -182,8 +193,10 @@ def _stop(o, side):
       · 平仓类    → 沿用在场那笔的止损（本来就在场，不重新给）
       · 底仓类    → **None**。建底仓是现货买入，策略里底仓没有价格止损，
                    唯一退出通道是「日线状态翻 DOWN → 清底仓」（见 portfolio_config.target）。
+                   减底仓同属底仓类：它只是把「目标变小」多出来的那部分卖掉，
+                   卖完剩下的半仓照样没有价格止损。
                    这不是漏算 —— 但 None 在页面上和「缺 ATR 算不出来」长得一样，
-                   所以 render() 里给「建底仓」单独渲染成「无」，不用「—」。
+                   所以 render() 里给底仓类单独渲染成「无」，不用「—」。
     """
     if o["action"] == "开仓":
         atr = o.get("atr")
@@ -192,7 +205,7 @@ def _stop(o, side):
             return None
         return round(px - side * ATR_K * atr, 6)
     # 平仓 / 止损临近 / 即将到期 → 沿用在场仓位的止损
-    # 建底仓 / 清底仓 → pos 为 None，自然返回 None（现货无止损）
+    # 建底仓 / 清底仓 / 减底仓 → pos 为 None，自然返回 None（现货无止损）
     p = o.get("pos") or {}
     return p.get("stop")
 
@@ -256,11 +269,13 @@ def _held_from_ledger(items):
     """
     held = {}
     for i in items:
-        if i.get("kind") not in ("建底仓", "清底仓") or i.get("status") != "done":
+        if i.get("kind") not in ("建底仓", "清底仓", "减底仓") or i.get("status") != "done":
             continue
         # 优先用实际成交额；没有则退回建单时的建议额。
         amt = i.get("fill_notional")
         amt = abs(float(amt)) if amt is not None else abs(i.get("notional") or 0)
+        # 建底仓 = 买入（+）；清底仓 / 减底仓 = 卖出（−）。减底仓只扣掉差额那一块，
+        # 剩下的半仓继续留在 held 里 —— 这正是它和清底仓的区别。
         sgn = 1 if i["kind"] == "建底仓" else -1
         held[i["coin"]] = held.get(i["coin"], 0.0) + sgn * amt
     return {k: v for k, v in held.items() if v > 0}
@@ -279,6 +294,11 @@ def sync(sig=None):
     # 因为 2026-11-19 起 RANGE 段也可能要求「底仓归零」（来路 DOWN），
     # 只看 state != DOWN 会把这类清仓单当天误作废掉。
     target_of = {o["c"]: (o.get("target") or 0) for o in sig["coins"]}
+    # 「不打折的底仓基准」（含 VT scale 与闸门，但不含 RANGE 来路系数）。
+    # 只在判断「减底仓单还需要执行吗」时用：target 回到 base_held 就说明
+    # 状态已经从打折档回到全额档（比如 RANGE→UP），那张减仓单该作废了。
+    # 拿 target 自己跟自己比不出来 —— 目标变小和变大拉不开差距。
+    baseheld_of = {o["c"]: (o.get("base_held") or 0) for o in sig["coins"]}
     live = {}
     for o in sig["coins"]:
         if o.get("action") not in TTL:
@@ -378,7 +398,7 @@ def sync(sig=None):
         # 现货账户里，做空性质的单直接作废（策略仍算空头，但这一单不下到账户）。
         # 不能只看 side：平多也是卖（side=-1），误杀会把「止损临近·多」清掉。
         # 所以判据用「开仓且 side<0」+ 新单里记下的 pos_side<0（平空/空头止损）。
-        if not PC.EXECUTE_SHORT and i["kind"] != "清底仓" and (
+        if not PC.EXECUTE_SHORT and i["kind"] not in ("清底仓", "减底仓") and (
                 (i["kind"] == "开仓" and i.get("side", 1) < 0)
                 or i.get("pos_side", 0) < 0):
             i["status"] = "void"
@@ -387,7 +407,7 @@ def sync(sig=None):
             voided += 1
             continue
         note = None
-        if i["kind"] in ("清底仓", "建底仓"):
+        if i["kind"] in ("清底仓", "建底仓", "减底仓"):
             t = target_of.get(i["coin"])
             if t is None:
                 continue                  # 这一轮没取到该币，先不动
@@ -395,6 +415,13 @@ def sync(sig=None):
                 note = f"当前目标 {t:,.0f} U > 0，不必再清底仓"
             elif i["kind"] == "建底仓" and t <= 0:
                 note = "当前目标为 0，不必建底仓"
+            elif i["kind"] == "减底仓":
+                # 减仓单只在「目标仍低于全额基准」时有效。回到全额档
+                # （RANGE→UP 且来路 UP，或状态翻回 UP）就不该再减了。
+                bh = baseheld_of.get(i["coin"], 0)
+                if bh and t >= bh - 1:
+                    note = (f"当前目标 {t:,.0f} U 已回到全额档 {bh:,.0f} U，"
+                            f"不必再减底仓")
         else:
             if i["key"] not in live:
                 note = "行情已变化，这条动作不再需要执行"
@@ -505,7 +532,7 @@ def _disp_amount(i, CUR):
     比两个都错还糟（人会以为自己抄对了）。
     """
     ref = _expect(i, CUR)
-    why = "系数/闸门已变" if i["kind"] in ("开仓", "建底仓") else "本金已变"
+    why = "系数/闸门已变" if i["kind"] in ("开仓", "建底仓", "减底仓") else "本金已变"
     # 老单没存 cap 字段；存了的就能确指「这是按 5000 生成的」
     if i.get("cap") and abs(i["cap"] - PC.CAPITAL) > 1.0:
         why = f"按 {i['cap']:,.0f} U 本金生成"
@@ -634,8 +661,8 @@ def render():
         stp = i["stop"]
         if stp is not None:
             stps = f"{stp:,.4f}" if abs(stp) < 10 else f"{stp:,.2f}"
-        elif i["kind"] == "建底仓":
-            # 现货新建仓没有价格止损（策略如此，不是漏算）。
+        elif i["kind"] in ("建底仓", "清底仓", "减底仓"):
+            # 现货进出没有价格止损（策略如此，不是漏算）。
             # 用「无」而不是「—」：两者含义不同，且单个汉字几乎不占宽 ——
             # 写成「无（现货）」会把「挂起」列挤出边框（这列是 nowrap 的）。
             stps = '<span style="color:#8d6e63">无</span>'
@@ -731,8 +758,8 @@ def render():
             f'「参考价」是信号那根 4H 的收盘价，不是限价 —— 隔久了照这个价挂不上。<br>'
             f'<b>「止损」有三种取值，含义不同：</b>'
             f'<b>数字</b>＝1.5×ATR(14) 硬止损（只有「开仓」新给，平仓类沿用在场那笔）；'
-            f'<b>无</b>＝建底仓是现货买入，策略里底仓没有价格止损，'
-            f'退出只走「日线状态翻 DOWN → 清底仓」这一条；'
+            f'<b>无</b>＝底仓类（建/减/清）都是现货，策略里底仓没有价格止损，'
+            f'退出只走「日线状态翻 DOWN → 清底仓」与「系数下调 → 减底仓」两条；'
             f'<b>—</b>＝卖出单本来就不需要止损，或该单缺 ATR 算不出。</div></div>')
     return head
 
@@ -742,7 +769,7 @@ def render():
 DELAY_CURVE = [(0, 0.0), (1, -7.8), (2, -12.1), (3, -21.7),
                (6, -33.8), (12, -51.3), (18, -59.3), (24, -58.3)]
 KIND_GROUP = {"开仓": "开仓", "平仓": "平仓类", "止损临近": "平仓类", "即将到期": "平仓类",
-              "清底仓": "底仓类", "建底仓": "底仓类"}
+              "清底仓": "底仓类", "建底仓": "底仓类", "减底仓": "底仓类"}
 
 
 def _delay_cost(bars):

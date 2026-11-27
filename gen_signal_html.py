@@ -242,13 +242,16 @@ if _SPOT:
                                 ("该持有", "right"), ("差额", "right"), ("说明", "left")])
         + f'</tr>{_srows}</table>'
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
-        f'「持有」由工单台账推（已结算的建底仓 − 清底仓）。'
-        f'现货底仓没有价格止损，唯一退出通道是「日线翻 DOWN → 清底仓」。'
+        f'「持有」由工单台账推（已结算的建底仓 − 减底仓 − 清底仓）。'
+        f'现货底仓没有价格止损，退出只有两条：「日线翻 DOWN → 清底仓」'
+        f'与「系数下调 → 减底仓」。'
         f'<br>带 <b>推定</b> 标记的行：台账里没有该单的实际成交额，'
         f'数字是把建单建议额收窄到当前目标推出来的 —— 它是估计，不是成交记录。'
         f'下单后执行 <code>ticket.py fill &lt;编号&gt; &lt;成交额U&gt;</code> 补录，标记即消失。'
-        f'<br><b>「差额」为负 = 超配</b>：底仓只在「日线翻 DOWN」或「RANGE 系数为 0」时'
-        f'才自动清，<b>策略不会为超配生成减仓工单</b> —— 这几种差额要按目标手动减。'
+        f'<br><b>「差额」为负 = 超配</b>：2026-11-27 起会生成<b>减底仓</b>工单'
+        f'（卖出多出来的那部分，现货无止损）—— 最常见的是 UP→RANGE 且来路 DOWN，'
+        f'底仓系数从 1.0 掉到 0.5。减仓单只在「目标仍低于全额基准」时有效，'
+        f'状态回到全额档会自动作废。'
         + (_PN_TXT) + (_PN_WARN)
         + (f'<br><b>两个净敞口不要混用</b>：策略书 '
            f'{sum(o.get("target") or 0 for o in PORT_ROWS) / (_CAP or 1):+.2f}×'
@@ -279,7 +282,9 @@ for o in PORT_ROWS:
         trig, tcol = "—", MU
     else:
         act = o["action"]
-        ac = {"开仓": UP, "闸门拦截": "#ef6c00", "空仓": MU}.get(act, MU)
+        ac = {"开仓": UP, "闸门拦截": "#ef6c00", "空仓": MU,
+              "建底仓": "#1565c0", "减底仓": "#e65100",
+              "清底仓": "#d84315"}.get(act, MU)
         if not o.get("exec", True):
             act = f"{act}·未建仓" if o.get("paper_why") == "no_pos" else f"{act}·纸面"
         # 这一段动作的工单已经执行过了。信号本身还是「开仓」（策略书照算），
