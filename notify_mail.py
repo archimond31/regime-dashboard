@@ -107,11 +107,17 @@ def _subj_action(new_items, bj_hm):
     """有新动作时的主题：锁屏上就要看得出「买还是卖、多少钱」。
 
     只列前 3 个，多了收尾 —— 主题被截断比信息少更糟，截断后「买 825U」可能刚好没了。
+
+    金额走 `TK._disp_amount`（与正文表格同一个数）。直接读 `i["notional"]` 是台账里的
+    **建单原值**，改本金 / 波动系数变了之后它就过期了：主题说「买 122U」、正文说「买 40U」，
+    而锁屏上看到的永远是主题那个。2026-11-27 #20 LINK 就是 40 vs 122。
     """
+    CUR = TK._cur_sig()[0]
     parts = []
     for i in new_items[:3]:
         sgn = "买" if i["side"] > 0 else "卖"
-        parts.append(f'{i["coin"]} {sgn}{i["notional"]:,.0f}U')
+        amt = TK._disp_amount(i, CUR)[0]
+        parts.append(f'{i["coin"]} {sgn}{amt:,.0f}U')
     tail = f' 等{len(new_items)}个' if len(new_items) > 3 else ""
     hard = any(i["kind"] == "开仓" for i in new_items)
     return f'【执行{"·急" if hard else ""}】' + " · ".join(parts) + tail + f' | {bj_hm}'
