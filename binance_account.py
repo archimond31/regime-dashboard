@@ -53,13 +53,18 @@
 ## 用法
 
     python binance_account.py set         # 交互式录入（getpass，不进 shell 历史）
+    python binance_account.py set --from %TEMP%\\k.txt
+                                          # 从文件读（两行或 {"key","secret"}），读完覆写+删除。
+                                          # 给「终端会把输入回显」的情况兜底（Git Bash/mintty 常见）
     python binance_account.py test        # 权限自检 + 拉一次，只打印掩码
     python binance_account.py snap        # 拉一次并写 .cex_snapshot.json
     python binance_account.py show        # 只看本地存了什么（key 打码）
     python binance_account.py rm          # 删掉本地密文
 
-⚠ **不要把 key 贴进聊天窗口。** 聊天记录是另一份没有加密的持久化副本，
-   而且它不在你的 `%LOCALAPPDATA%` 里。用 `set` 子命令在本机输入即可。
+⚠ **不要把 key 贴进聊天窗口 / 微信 / 任何 Agent 的对话框。**
+   对话记录是另一份**没有加密**的持久化副本（本机 jsonl + 服务商侧），
+   而且它不在你的 `%LOCALAPPDATA%` 里 —— 那样等于把最脏的一份放在最安全的那层外面。
+   要在本机输入，或者 `--from` 传文件。
 
 ## 网络
 
@@ -523,12 +528,64 @@ def refresh(max_age_min=10, quiet=True):
 # ============================================================
 # 五、CLI
 # ============================================================
+def _read_secret_file(p):
+    """从文件读 key/secret。认两种格式：`{"key":..,"secret":..}` 或两行纯文本。"""
+    txt = open(p, encoding="utf-8-sig").read()
+    try:
+        j = json.loads(txt)
+        if isinstance(j, dict):
+            return (str(j.get("key") or "")).strip(), (str(j.get("secret") or "")).strip()
+    except Exception:                                        # noqa: BLE001
+        pass
+    lines = [x.strip() for x in txt.replace("\r", "").split("\n") if x.strip()]
+    if len(lines) >= 2:
+        return lines[0], lines[1]
+    return "", ""
+
+
+def _shred(p):
+    """先覆写随机字节再删。**这是"尽力"，不是保证** ——
+
+    SSD 的写时复制、Windows 的卷影副本、杀软隔离区都可能留着旧内容。
+    所以 `--from` 只在 getpass 不可用时用（有些终端不禁用回显），
+    能本地敲就打本地敲。
+    """
+    try:
+        n = max(os.path.getsize(p), 1)
+        with open(p, "r+b") as f:
+            f.write(os.urandom(n))
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:                                        # noqa: BLE001
+        pass
+    try:
+        os.remove(p)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def _cmd_set(argv):
     force = "--force" in argv
-    print("粘贴 key 与 secret（输入不回显，也不进 shell 历史）。")
-    print("先确认权限已按文件头的清单勾好：只开 Enable Reading。")
-    key = getpass.getpass("API Key   : ").strip()
-    secret = getpass.getpass("API Secret: ").strip()
+    src = None
+    if "--from" in argv:
+        i = argv.index("--from")
+        if i + 1 < len(argv):
+            src = argv[i + 1]
+    if src:
+        if not os.path.exists(src):
+            print(f"文件不存在：{src}")
+            return 1
+        key, secret = _read_secret_file(src)
+        print(f"从 {src} 读取（读完会覆写并删除）")
+    else:
+        print("输入 key 与 secret（不回显、不进 shell 历史）。")
+        print("若你的终端把输入回显出来了，Ctrl+C 中止，改用 --from 传文件。")
+        print("先确认权限已按文件头的清单勾好：只开 Enable Reading。")
+        key = getpass.getpass("API Key   : ").strip()
+        secret = getpass.getpass("API Secret: ").strip()
+    if src:
+        _shred(src)
+        print(f"  已覆写并删除 {src}")
     if not key or not secret:
         print("空输入，放弃")
         return 1
