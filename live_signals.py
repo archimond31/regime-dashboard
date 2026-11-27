@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 """实盘信号生成（只出信号，绝不下单）。
 
-品种：BTC ETH SOL BNB XRP HYPE LINK UNI AAVE ZEC NEAR（11 币）
+品种：组合 11 币 BTC ETH SOL BNB XRP HYPE LINK UNI AAVE ZEC NEAR
       2026-11-18 去 CRV 加 ZEC/DOGE/NEAR；2026-11-27 去 DOGE（meme 币）。
-      **COINS 与 portfolio_config.WEIGHTS_SMALL 必须同集**：COINS 多一个 → 该币算出
-      target=0 却被打印成「空仓」；少一个 → 权重表里有钱没处放（静默变现金）。
+      观察名单 4 币 SNX PENDLE RENDER ONDO（2026-11-27 加）：只算状态、只发信号，
+      **不持仓、不出工单**（`portfolio_config.WATCH_ONLY`，权重为 0 且不在权重表里）。
+      **PORTFOLIO 与 WEIGHTS_SMALL 必须同集**：多一个 → 该币算出 target=0 却被
+      打印成「空仓」；少一个 → 权重表里有钱没处放（静默变现金）。
+      **WATCH 反过来必须与 PORTFOLIO 不相交**：同时出现就是既想要仓位又不想执行。
 
 复刻回测的三层骨架：
   L1  日线 G 状态机定方向与底仓（UP/RANGE → 1.0，DOWN → 0）
@@ -63,11 +66,18 @@ BLOOD_LABEL = {
     "trend_flat_down": "盘整识别↓",
 }
 
-COINS = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "UNI", "AAVE",
-         "ZEC", "NEAR"]
+PORTFOLIO = ["BTC", "ETH", "SOL", "BNB", "XRP", "HYPE", "LINK", "UNI", "AAVE",
+             "ZEC", "NEAR"]
+# 观察名单：状态机照跑、信号照发，但没有仓位、不出工单。
+# **COINS 仍然包含它们** —— 分析、页面、邮件都要看到；区别只体现在
+# action（固定「观察」）与 exec（固定 False）上，而不是「算不算」。
+WATCH = [c for c in PC.WATCH_ONLY]
+COINS = PORTFOLIO + WATCH
 SECTOR = {"BTC": "储值", "ETH": "L1", "SOL": "L1", "BNB": "交易所", "XRP": "支付",
           "HYPE": "DEX/永续", "LINK": "预言机", "UNI": "DeFi", "AAVE": "DeFi",
-          "ZEC": "隐私币", "NEAR": "L1"}
+          "ZEC": "隐私币", "NEAR": "L1",
+          # ---- 观察名单（2026-11-27）
+          "SNX": "衍生品", "PENDLE": "利率", "RENDER": "算力", "ONDO": "RWA"}
 LOOKBACK, ATR_K, MAX_BARS, VOL_Q = BT.LOOKBACK, BT.ATR_K, BT.MAX_BARS, BT.VOL_Q
 
 
@@ -472,6 +482,15 @@ def spot_estimated():
     return set(_EST)
 
 
+def _ticket_items():
+    """台账里的工单列表。读不到就返回空 —— 信号不能因为台账坏了而整轮不出。"""
+    try:
+        with open(TICKETS, encoding="utf-8") as f:
+            return json.load(f).get("items", [])
+    except Exception:
+        return []
+
+
 def short_opened():
     """哪些币**真的被执行过做空开仓** —— 从工单台账的 done 记录推。
 
@@ -525,6 +544,32 @@ def main():
         # 长得一样，而处理方式完全不同。
         o["paper_why"] = (None if o["exec"] else
                           ("short_off" if not PC.EXECUTE_SHORT else "no_pos"))
+        # ---- 观察名单：在执行口径上**再盖一次章** ----
+        # 不能只靠 target=0 来保证「不执行」：`analyze()` 若判出 4H 突破会把 action
+        # 改成「开仓」，而 `PC.executable("开仓", side=1, ...)` 对多头恒返回 True。
+        # 也就是说「恰好没执行」只是因为它这一轮没突破 —— 那不是保证，是运气。
+        # 这里显式置 action/exec/watch，后面 ticket.sync 再按 watch 挡一次。
+        if o["c"] in PC.WATCH_ONLY:
+            o["watch"] = True
+            o["action"] = "观察"
+            o["exec"] = False
+            o["paper_why"] = "watch"
+            o["note"] = (PC.WATCH_ONLY[o["c"]].split("｜")[-1]
+                         + "｜只跟踪状态，不持仓、不出工单")
+
+    # ---- 已经执行过的动作，别再叫一次 ----
+    # 判断用工单**键**（币|动作|regime_start），不是「有没有 open 单」：
+    # 执行完的单状态是 done，不在 open 列表里，于是页面继续写「本轮新触发：LINK 开仓」
+    # —— 2026-11-27 用户刚买完 40 U 永续，下一轮系统还在催同一次突破。
+    # 这是「看到了、以为做了」的镜像错误：**做完了、系统还说要做**。
+    # 代价同样是人开始不信这封邮件。
+    _done_keys = {i.get("key") for i in _ticket_items() if i.get("status") == "done"}
+    for o in rows:
+        if o.get("watch"):
+            o["settled"] = False
+            continue
+        o["settled"] = (f'{o["c"]}|{o["action"]}|{o.get("regime_start") or ""}'
+                        in _done_keys)
 
     # ---- 底仓动作提示（建 / 清）----
     # 底仓的进出此前只体现为 target 数字从正变零或反过来 ——
@@ -534,6 +579,8 @@ def main():
     bc = _load_bc()
     held = spot_held({o["c"]: o.get("target") for o in rows})
     for o in rows:
+        if o.get("watch"):
+            continue          # 观察名单不参与底仓：target=0，任何「建/清」都是噪音
         if o["pos"] is not None:
             continue                      # 已有 4H 持仓，底仓动作不单独提示
         rs = o.get("regime_start") or ""
@@ -633,7 +680,8 @@ def main():
     _ACT = ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")
     # 分成两组，不能混：urgent 会变成工单，paper 只进策略书。
     # 「需要动作 N 个」如果连纸面空头也数进去，等于每封信都在叫醒你去做不会做的事。
-    urgent = [o for o in rows if o["action"] in _ACT and o.get("exec", True)]
+    urgent = [o for o in rows if o["action"] in _ACT and o.get("exec", True)
+              and not o.get("settled")]
     paper = [o for o in rows if o["action"] in _ACT and not o.get("exec", True)]
     # 策略书记录了空头、但账户从没建过的那几个：它们不是"不做的空头"，
     # 是"错过了入场的空头"。页面上要单列，否则会跟"没这功能"混成一件事。

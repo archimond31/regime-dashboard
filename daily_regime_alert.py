@@ -67,6 +67,15 @@ ASSETS = [
     {"key": "ZEC",  "label": "ZEC Zcash",     "group": "加密", "source": "hyperliquid", "symbol": "ZEC",  "unit": "USD/枚"},
     {"key": "DOGE", "label": "DOGE 狗狗币",   "group": "加密", "source": "hyperliquid", "symbol": "DOGE", "unit": "USD/枚"},
     {"key": "NEAR", "label": "NEAR",          "group": "加密", "source": "hyperliquid", "symbol": "NEAR", "unit": "USD/枚"},
+    # ---- 2026-11-27 加的 4 个：只做信号监控，不进策略组合、不产生工单 ----
+    # 与组内其余 13 个同源（Hyperliquid 永续日线），所以价格口径一致；
+    # 但**信号页走的是 Binance 现货**（fetch_binance_vision），两边的日线状态
+    # 可能偶尔不同 —— 那是「永续 vs 现货 + 两套状态机实现」的既有差异，
+    # 不是这 4 个品种特有的。要判断执行，以信号页为准；面板看的是跨资产读数。
+    {"key": "ONDO",   "label": "ONDO Ondo",        "group": "加密", "source": "hyperliquid", "symbol": "ONDO",   "unit": "USD/枚"},
+    {"key": "PENDLE", "label": "PENDLE Pendle",    "group": "加密", "source": "hyperliquid", "symbol": "PENDLE", "unit": "USD/枚"},
+    {"key": "RENDER", "label": "RENDER Render",    "group": "加密", "source": "hyperliquid", "symbol": "RENDER", "unit": "USD/枚"},
+    {"key": "SNX",    "label": "SNX Synthetix",    "group": "加密", "source": "hyperliquid", "symbol": "SNX",    "unit": "USD/枚"},
     # ---- 商品：2026-11-26 从单一「商品」组拆成四组，按定价链条排 ----
     # 拆的理由不是「金属/农产品」这种商品学分类，是**读数顺序**：
     #   能源 ≈ 几乎所有商品的成本端，也是最上游的通胀源；

@@ -287,6 +287,14 @@ def sync(sig=None):
         # 判据用信号自带的 exec 字段（由 PC.executable 生成），不在这里另判一遍。
         if not o.get("exec", True):
             continue
+        # 观察名单（2026-11-27）：只跟踪状态，任何时候都不开工单。
+        # 这里**再判一次**是有意的重复：live_signals 已经把 exec 压成 False，
+        # 但 `exec` 是个派生量，将来谁改一处判断就可能翻回 True，而工单一旦
+        # 生成就可能被执行成真钱。`watch` 是原始身份（在不在 WATCH_ONLY 里），
+        # 拿身份挡比拿派生量挡可靠 —— 这一条**不属于**「两处各判一遍」那类分叉，
+        # 因为它的语义是「身份」而不是「重算同一个结论」。
+        if o.get("watch"):
+            continue
         k = f'{o["c"]}|{o["action"]}|{o.get("regime_start") or bar}'
         live[k] = o
 

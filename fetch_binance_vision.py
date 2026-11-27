@@ -75,6 +75,16 @@ SYMBOLS = {
     "ACH": "ACHUSDT",
     "LPT": "LPTUSDT",
     "SSV": "SSVUSDT",
+    # ---- 观察名单（2026-11-27）：只跟踪信号，不进组合、不产生工单
+    "SNX": "SNXUSDT",
+}
+
+# 改过名的品种：新符号 ← 旧符号 + 切换月。**1:1 置换、价格连续，可以直接拼。**
+# 不拼的后果是静默的：只读新符号，历史就从切换月开始 —— 对要用 MA120 的日线状态机
+# 来说，等于这一轮之前的整个周期都不存在（RENDER 少了 2020-05~2024-07，
+# 含 2021 牛市与 2022 熊市）。这类「少了一段」不会报错，只会让状态看起来更"新"。
+RENAMED = {
+    "RENDER": ("RNDR", "2024-07"),   # 2024-07-23 RNDR→RENDER
 }
 
 # 各品种在 Binance 现货的上线月，用来缩短探测范围
@@ -109,6 +119,8 @@ LISTED_FROM = {
     "ACHUSDT": (2021, 8),
     "LPTUSDT": (2021, 10),
     "SSVUSDT": (2021, 11),
+    # ---- 观察名单：SNX 在 Binance 现货 2019 年就有，先写早（404 只浪费请求）
+    "SNXUSDT": (2019, 1),
 }
 
 _CACHE_TAIL = {}
@@ -261,6 +273,32 @@ def load_bars(name, interval="4h", force=False, end=None, tail=True):
                 for tag in days]
         for f in futs:
             rows += f.result()
+
+    # 1b) 改过名的品种：把**切换月之前**的历史从旧符号补上（见 RENAMED 的说明）。
+    #     放在去重之前 —— 重叠的那一个月两边都有，靠后面的 ts 去重吞掉。
+    prev = RENAMED.get(name)
+    if prev:
+        old_code, cut = prev
+        # **短代码要换成归档用的交易对**（RNDR → RNDRUSDT）。直接用短代码拼 URL
+        # 会得到 `.../klines/RNDR/4h/RNDR-4h-2023-01.zip` —— 404，`_fetch_one`
+        # 按设计把 404 当「该月未上线」吞掉，于是拼接口静默失效、结果和没写一样。
+        # 这类空转最难发现：调用次数、耗时、日志全都正常。
+        old_sym = SYMBOLS[old_code]
+        o_start = LISTED_FROM.get(old_sym, (2020, 1))
+        o_end = (int(cut[:4]), int(cut[5:7]))
+        if o_end[1] > 1:
+            o_end = (o_end[0], o_end[1] - 1)      # 只取到切换月的前一个月
+        else:
+            o_end = (o_end[0] - 1, 12)
+        if o_start <= o_end:
+            t_old = int(datetime(o_start[0], o_start[1], 1,
+                                 tzinfo=timezone.utc).timestamp() * 1000)
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                futs = [ex.submit(_fetch_one, old_sym, "monthly",
+                                  f"{y:04d}-{m:02d}", t_old, None, interval)
+                        for y, m in _months(o_start, o_end)]
+                for f in futs:
+                    rows += f.result()
 
     rows.sort(key=lambda r: r[0])
     seen, bars = set(), []

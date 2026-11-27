@@ -122,6 +122,26 @@ WEIGHTS_SMALL = {
     "AAVE": 0.04, "LINK": 0.04,
 }
 
+# ---------- 观察名单（2026-11-27）：只跟踪信号，不进组合 ----------
+# 用户要求「增加几个代币的信号监控……信号同步发送，但是不执行」。
+#
+# **它们绝不能被放进 WEIGHTS_SMALL。** 一进权重表就有 target → 有 base_held → 会生成
+# 「建底仓 / 开仓」工单，而工单一旦 done 就进真实的钱。观察和持有是两件事，
+# 用同一个数（权重）表达它们，迟早会出现「我只想看看，系统替我买了」。
+#
+# 权重为 0 的正确表达方式不是「权重表里写 0.0」—— 那样 `weights_for()` 照样返回它，
+# `split()` 会给出 0/0/0 并让 `cap_check` 对一个不存在的量做冲击判定，
+# 页面还会把它列进「该持有 0 U」。**不在这张表里**才是干净的状态，配合
+# `target()` 的早退分支给出人话说明。
+#
+# 想升级成持仓：加进 WEIGHTS_SMALL（注意 Σw 会变）→ 从这张表删掉 → 跑三个口径重算。
+WATCH_ONLY = {
+    "SNX":    "Synthetix｜衍生品流动性层",
+    "PENDLE": "Pendle｜利率代币化",
+    "RENDER": "Render｜去中心化算力",
+    "ONDO":   "Ondo｜RWA 代币化",
+}
+
 # 容量约束参数（大额表用）
 MAX_IMPACT = 0.03         # 单笔冲击红线：超过最差 4H 额（p5）的 3% 判超标
 SINGLE_CAP = 0.25         # 单币权重上限：防止容量填充把仓位全堆到 BTC/HYPE 身上
@@ -313,6 +333,11 @@ def target(capital, coin, state, adding=False, closing=False, scale=1.0,
                （当前 UP→1.0 / DOWN→0.5）。None（数据起点）取 DEFAULT=1.0。
     """
     w = weights_for(capital).get(coin)
+    if coin in WATCH_ONLY:
+        # 观察名单：状态照算、信号照发，但没有仓位。
+        # 返回 0 而不是「不在配置表里」的错误文案 —— 后者会被页面渲染成
+        # 「底仓 0 U / 差额 0」，看起来像「规则要求持有 0」，而事实是「不参与组合」。
+        return 0.0, f"观察名单｜{WATCH_ONLY[coin]}｜只跟踪状态，不持有、不出工单"
     if w is None:
         return 0.0, f"{coin} 不在配置表里"
     base = capital * w * BASE_RATIO * scale * base_gate

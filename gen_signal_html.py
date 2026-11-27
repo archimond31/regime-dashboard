@@ -20,6 +20,11 @@ OUT = "signal_now.html"
 
 d = json.load(open(SRC, encoding="utf-8"))
 COINS = d["coins"]
+# 观察名单与组合必须**分开渲染**（2026-11-27 加的 SNX/PENDLE/RENDER/ONDO）。
+# 混在同一张表里的后果是「权重 0 / 底仓 0 / 峰值 0」被读成「规则要求持有 0」，
+# 而事实是「不参与组合」—— 同一个数字，两种完全不同的含义。
+PORT_ROWS = [o for o in COINS if not o.get("watch")]
+WATCH_ROWS = [o for o in COINS if o.get("watch")]
 # 底仓闸门默认关闭（去前视后不如不开，见 base_gate.py 文件头）。
 # 关着的时候不该在表里摆一列「100%」—— 那会让人以为它在工作。
 BG_ON = bool((d.get("basegate") or {}).get("on"))
@@ -51,9 +56,14 @@ else:
 # 多头峰值 1.5× 里 1.0 是现货、0.5 是永续加仓；后者与做空与否无关。
 PEAK_TXT = "峰值 1.5×（空头另计 0.5×）" if SHORT_ON else "峰值 1.5×（无空头）"
 _CAP = d.get("capital") or 0.0
-urgent = [o for o in COINS if o["action"] in ("开仓", "平仓", "清底仓", "建底仓", "止损临近", "即将到期")]
-holds = [o for o in COINS if o["pos"]]
-blocked = [o for o in COINS if o["gate_blocked"]]
+# 「本轮要动作」**取信号文件里的 urgent**，不在这里按 action 重算一遍。
+# 重算会漏掉 live_signals 的两层过滤：exec（这一单要不要真下）与 settled
+# （这一段的工单是不是已经执行过）。2026-11-27 LINK 那条就是：信号已标 settled，
+# 页面自己一算又说「需动作 1 个」—— 用户刚买完，下一封邮件还在催。
+_URG = set(d.get("urgent") or [])
+urgent = [o for o in PORT_ROWS if o["c"] in _URG]
+holds = [o for o in PORT_ROWS if o["pos"]]
+blocked = [o for o in PORT_ROWS if o["gate_blocked"]]
 errs = d.get("errors") or []
 
 UP, DN, BD, TX, MU = "#c62828", "#2e7d32", "#e0e0e0", "#1a1a1a", "#757575"
@@ -210,7 +220,7 @@ if _SPOT:
     # 日线 DOWN 而没有底仓的币：这是**符合规则**的状态，不是遗漏。
     # 不写这句，看到「11 个币只有 7 个有货」会以为漏买了。
     # （币数会随组合调整而变 —— 2026-11-27 去 DOGE 后是 11，别再写死这个数。）
-    _flat = [o["c"] for o in COINS if not _SPOT.get(o["c"]) and o["state"] == "DOWN"]
+    _flat = [o["c"] for o in PORT_ROWS if not _SPOT.get(o["c"]) and o["state"] == "DOWN"]
     _PN_TXT = (
         f'<br><b>永续层</b>（台账 done 的开仓 − 平仓）：净 <b>{_PN["net"]:+,.0f} U</b>'
         f'（{_PN["n"]} 笔，毛 {_PN["gross"]:,.0f} U）'
@@ -241,7 +251,7 @@ if _SPOT:
         f'才自动清，<b>策略不会为超配生成减仓工单</b> —— 这几种差额要按目标手动减。'
         + (_PN_TXT) + (_PN_WARN)
         + (f'<br><b>两个净敞口不要混用</b>：策略书 '
-           f'{sum(o.get("target") or 0 for o in COINS) / (_CAP or 1):+.2f}×'
+           f'{sum(o.get("target") or 0 for o in PORT_ROWS) / (_CAP or 1):+.2f}×'
            f'（含未建仓空头）｜实盘现货 {_ssum / (_CAP or 1):+.2f}×。'
            + ('风控看上面的<b>合计</b>（现货 + 永续），判断策略状态看前者。'
               if _PN["n"] else '风控看后者，判断策略状态看前者。')
@@ -253,9 +263,9 @@ if _SPOT:
 else:
     spot_block = ""
 
-# ---------- 全表 ----------
+# ---------- 全表（只列组合；观察名单单独一块，见下）----------
 rows = ""
-for o in COINS:
+for o in PORT_ROWS:
     st = o["state"]
     g = o["gate"]
     if o["pos"]:
@@ -272,6 +282,11 @@ for o in COINS:
         ac = {"开仓": UP, "闸门拦截": "#ef6c00", "空仓": MU}.get(act, MU)
         if not o.get("exec", True):
             act = f"{act}·未建仓" if o.get("paper_why") == "no_pos" else f"{act}·纸面"
+        # 这一段动作的工单已经执行过了。信号本身还是「开仓」（策略书照算），
+        # 但页面必须说「已执行」—— 否则用户刚下完单，这封邮件还在催同一次突破。
+        # 「看到了、以为做了」的反面：「做完了、系统还说要做」。两者都消耗可信度。
+        if o.get("settled"):
+            act, ac = "已执行", "#2e7d32"
         # need 是「还要走多少百分比」，乘上方向才看得出是涨还是跌：
         # 做多 want=+1 → +5.77%（要涨）；做空 want=-1 → −2.42%（要跌）
         if o.get("need") is not None:
@@ -334,7 +349,7 @@ for o in COINS:
         f'color:{ac};font-weight:{"600" if act in ("开仓", "闸门拦截") else "400"}">{act}</td></tr>')
 
 all_block = (
-    f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">全部 {len(COINS)} 个品种</h2>'
+    f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">组合 {len(PORT_ROWS)} 个品种</h2>'
     f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
     f'<tr style="background:#f5f5f5">'
     + "".join(f'<th style="padding:7px 9px;text-align:right;font-size:12px;color:{MU};font-weight:500">{h}</th>'
@@ -360,8 +375,73 @@ all_block = (
     f'既不受 MA60 纠错、也不受「背离失败」约束，只有「RSI 破 30 再升破」一个出口——'
     f'上涨行情中该出口永不触发，会长时间锁死。此段不开新仓，已有持仓照常按翻转平。</div>')
 
+# ---------- 观察名单块（2026-11-27）----------
+# 只跟状态，不持仓。**为什么不并进上面那张表**：那张表每列（底仓 / 权重 / 峰值）
+# 对它们都是 0，而 0 在这里的含义是「不参与组合」，不是「规则要求持有 0」。
+# 同一个数字两种含义塞进一张表，必然被读错 —— 而读错的后果是「为什么系统让我买 0 U」。
+watch_block = ""
+if WATCH_ROWS:
+    _wrows = ""
+    for o in WATCH_ROWS:
+        st = o["state"]
+        if o.get("need") is not None:
+            # 与组合表同口径：need 是「还要走多少百分比」，乘方向才看得出涨还是跌
+            _v = o["need"] * o.get("want", 1)
+            trig, tcol = f"{_v:+.2f}%", (UP if _v > 0 else DN)
+        else:
+            trig, tcol = "—", MU
+        _g = o["gate"]
+        gtxt = f"{_g * 100:.0f}%" if _g is not None else "—"
+        gcol = ("#ef6c00" if o["gate_blocked"]
+                else (TX if _g is not None and _g > 0.7 else MU))
+        _bl = o.get("blood_label") or "—"
+        blcol = "#d32f2f" if o.get("blood_locked") else MU
+        # 有模拟仓的（策略书里在场、账户没有）必须写出来：不然「动作=观察」会被
+        # 读成「没有信号」。它确实有信号，只是我们不动 —— 这两件事不一样。
+        _p = o.get("pos")
+        _note = o.get("note") or ""
+        if _p:
+            _note = (f"策略书 {'空' if _p.get("side", 1) < 0 else '多'}头在场 "
+                     f"{_p.get('held', 0)} 根 4H，浮盈 {_p.get('upnl_r', 0):+.2f}R"
+                     f"（模拟，不执行）")
+        _wrows += (
+            f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px">'
+            f'<b>{o["c"]}</b><span style="color:{MU};font-size:11px"> {o["sector"]}</span></td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;'
+            f'color:{state_color(st)};font-weight:600;text-align:center">{st}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:12px;color:{blcol}">{_bl}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right">{px(o["px"])}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;color:{MU}">'
+            f'{pct(o["atrp"] * 100) if o["atrp"] else "—"}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
+            f'color:{gcol}">{gtxt}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:13px;text-align:right;'
+            f'color:{tcol};font-weight:600">{trig}</td>'
+            f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:12px;color:{MU}">'
+            f'{_esc(_note)}</td></tr>')
+    watch_block = (
+        f'<h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">'
+        f'观察名单（{len(WATCH_ROWS)} 个 · 只跟信号，不持仓）</h2>'
+        f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+        f'<tr style="background:#f5f5f5">'
+        + "".join(f'<th style="padding:7px 9px;text-align:right;font-size:12px;color:{MU};'
+                  f'font-weight:500">{h}</th>'
+                  for h in ("品种", "日线状态", "状态血统", "现价", "ATR%",
+                            "波动分位", "距触发", "说明"))
+        + f'</tr>{_wrows}</table>'
+        f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
+        f'<b>这 {len(WATCH_ROWS)} 个币不占本金、不产生工单</b>：状态与触发方向照算照发，'
+        f'但权重为 0（`portfolio_config.WATCH_ONLY`，不在 `WEIGHTS_SMALL` 里），'
+        f'所以没有底仓、没有加仓层、也不会出现在任何一封「执行」邮件里。'
+        f'想升级成持仓：从 `WATCH_ONLY` 删掉 → 加进 `WEIGHTS_SMALL`（Σw 会变）→ '
+        f'三个口径重算，不能只加权重不复算。<br>'
+        f'数据：4H 走 Binance 现货归档（与组合同源）。RENDER 2024-07 由 RNDR 改名，'
+        f'历史已按 1:1 置换拼回前身 RNDR（2021-11 起）；不拼会从改名那天才开始，'
+        f'等于丢掉 2022 整段 —— 而那种「少了一段」不会报错，只会让状态看起来更新。</div>')
+
+
 # ---------- 顶部 KPI ----------
-nearest = min((o for o in COINS if not o["pos"] and o.get("need") is not None),
+nearest = min((o for o in PORT_ROWS if not o["pos"] and o.get("need") is not None),
               key=lambda o: abs(o["need"]), default=None)
 # KPI 里的「待执行」用跨轮工单数，不用本轮的 urgent ——
 # 本轮的 urgent 每 4 小时清零，读它会让人以为「没有欠账」。
@@ -374,7 +454,7 @@ kpis = [("本金", f"{_cap:,.0f} U", TX),
         # 写「含做空·纸面」而不是「纯现货」——策略仍算空头，只是不发单，
         # 这两件事对「该期待什么收益」的影响完全不同。
         ("模式", MODE_SHORT, "#1565c0"),
-        ("4H 仓", f"{len(holds)} / {len(COINS)}", TX),
+        ("4H 仓", f"{len(holds)} / {len(PORT_ROWS)}", TX),
         ("待执行工单", f"{_open_n} 张", UP if _open_n else TX),
         ("闸门拦截", f"{len(blocked)}", "#ef6c00" if blocked else TX),
         ("最接近触发", f'{nearest["c"]} {abs(nearest["need"]):.2f}%' if nearest else "—", TX)]
@@ -439,6 +519,7 @@ font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
 {hold_block}
 {spot_block}
 {all_block}
+{watch_block}
 
 <h2 style="font-size:15px;margin:26px 0 10px;color:{TX}">规则速查</h2>
 <div style="font-size:12.5px;color:#444;line-height:1.9;background:#fafafa;border:1px solid {BD};

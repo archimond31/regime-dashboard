@@ -132,13 +132,18 @@ def _subj_remind(exp, bj_hm):
 def _subj_patrol(sig, holds, bj_hm, op_n):
     near = min((o for o in sig["coins"] if not o["pos"] and o.get("need") is not None),
                key=lambda o: abs(o["need"]), default=None)
+    # 分母必须是**组合**品种数，不是 sig["coins"] 全部。
+    # 2026-11-27 加了 4 个观察名单后，全表是 15 而仓位只可能出现在 11 个里 ——
+    # 「4H 仓 3/15」会让人以为还有 12 个候选没买。观察币另有一句写明白。
+    _nport = sum(1 for o in sig["coins"] if not o.get("watch"))
+    _nwatch = sum(1 for o in sig["coins"] if o.get("watch"))
     # 「持仓」只数 4H 永续仓，现货账户里永远是 0/12 —— 看着像空仓，
     # 实际有 7 个币的现货底仓。两个数都写出来，否则每封信都在自相矛盾。
     # 「纸面」= 策略算到但本账户不执行的空头动作数，不写就不知道策略在做什么。
     spot = sig.get("spot_held") or {}
     md = ("含做空·执行" if (sig.get("allow_short") and sig.get("execute_short"))
           else ("含做空·纸面" if sig.get("allow_short") is not False else "不做空"))
-    s = (f'【巡检】{md} · 4H 仓 {len(holds)}/{len(sig["coins"])}'
+    s = (f'【巡检】{md} · 4H 仓 {len(holds)}/{_nport}'
          f' · 现货 {len(spot)}')
     paper = sig.get("paper") or []
     if paper:
@@ -149,6 +154,10 @@ def _subj_patrol(sig, holds, bj_hm, op_n):
     if unop:
         s += f' · 未建仓 {len(unop)}'
     s += f' · 待办 {op_n}'
+    # 观察名单单独一句：它们有状态、会报「距触发」，但永远不会变成仓位。
+    # 不写这句，主题里出现「距 SNX 触发 0.3%」会让人以为该去看单子。
+    if _nwatch:
+        s += f' · 观察 {_nwatch}'
     if near:
         s += f' · 距{near["c"]}触发{abs(near["need"]):.1f}%'
     return s + f' | {bj_hm}'
