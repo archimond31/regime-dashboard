@@ -578,17 +578,32 @@ def main():
     for o in rows:
         if o.get("watch"):
             o["settled"] = False
+            o["base_settled"] = False
             continue
         o["settled"] = (f'{o["c"]}|{o["action"]}|{o.get("regime_start") or ""}'
                         in _done_keys)
+        # 这一段的**底仓**动作是否已执行过（建/减/清任一）。
+        # 页面靠它区分两种「差额」：
+        #   · 底仓还没建 → 差额是**待办**，下一轮会变成工单；
+        #   · 底仓已经建过 → 差额是**偏差**（VT scale 每 7 天重算、权重也调过），
+        #     本段内不会再补，因为底仓「一段一次」。
+        # 不区分的话，用户会一直看到「+28 待买」却永远等不到买入提醒 ——
+        # 2026-11-27 就是这个困惑：XRP +28、HYPE +22 都是已建过底仓后的 scale 漂移。
+        _rs = o.get("regime_start") or ""
+        o["base_settled"] = (f'{o["c"]}|建底仓|{_rs}' in _done_keys
+                             or f'{o["c"]}|减底仓|{_rs}' in _done_keys
+                             or f'{o["c"]}|清底仓|{_rs}' in _done_keys)
 
-    # ---- 底仓动作提示（建 / 清）----
+    # ---- 底仓动作提示（建 / 清 / 减）----
     # 底仓的进出此前只体现为 target 数字从正变零或反过来 ——
     # 不点开 JSON 根本看不见。下跌初期最容易「看着信号觉得没事、底仓还挂着」，
     # 上涨初期同理「该建底仓却一直空着」。这里补成显式指令。
     # 去重：按「动作 + 该轮状态的起始日」记台账，同一轮只提示一次。
     bc = _load_bc()
-    held = spot_held({o["c"]: o.get("target") for o in rows})
+    # 收窄基准传**现货层额度**（base_held × range_ratio），不是 target：
+    # target 含永续加仓层，拿它当现货的收窄基准会系统性偏大。
+    held = spot_held({o["c"]: (o.get("base_held") or 0) * o.get("range_ratio", 1.0)
+                      for o in rows})
     for o in rows:
         if o.get("watch"):
             continue          # 观察名单不参与底仓：target=0，任何「建/清」都是噪音
@@ -737,9 +752,12 @@ def main():
            # 手上真实持有的现货底仓（从工单台账推），给 hold 页与邮件做「有货才提示卖」。
            # pending=False：页面上的「持有」必须是**已经买了的**，不能把还没执行的
            # open 工单算进去 —— 那会让「该持有/差额」自我平衡，把「这一笔还没下」藏起来。
-           # spot_est：这几行的金额没有成交记录、是按当前目标收窄推出来的，页面要标「推定」。
+           # spot_est：这几行的金额没有成交记录、是按「建单建议额收窄到现货层额度」
+           # 推出来的，页面要标「推定」。收窄基准必须是 base_held × rr 而不是 target ——
+           # target 含永续加仓层，拿它当基准会让推定判据系统性偏松。
            "spot_held": {k: round(v) for k, v in
-                         spot_held({o["c"]: o.get("target") for o in rows},
+                         spot_held({o["c"]: (o.get("base_held") or 0)
+                                    * o.get("range_ratio", 1.0) for o in rows},
                                    pending=False).items()},
            "spot_est": sorted(spot_estimated()),
            # 生效配置留痕：三个月后回看「当时到底开没开」不用翻代码

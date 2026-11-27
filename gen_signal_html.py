@@ -198,11 +198,34 @@ if _SPOT:
         if not v:
             continue
         _ssum += v
-        tgt = o.get("target") or 0
+        # **「该持有」是现货底仓层，不是 target。** target 是「峰值 = 底仓 + 加仓层」，
+        # 而加仓层走**永续**。直接拿 target 减现货持有，会把已经在永续执行过的加仓层
+        # 当成「还欠一笔现货」再提醒一次 —— 2026-11-27 实测：LINK 显示 +40 待买，
+        # 而那 40 U 就 #20 那笔永续多；XRP 显示 +169，其中 141 是刚执行的开仓单。
+        # 全表虚报 275 − 94 = 181 U，全是重复。
+        _bh = o.get("base_held") or 0
+        _rr = o.get("range_ratio", 1.0)
+        tgt = _bh * _rr                       # 现货层应持有（含 scale / 闸门 / RANGE 来路系数）
+        _peak = o.get("target") or 0          # 峰值：底仓 + 加仓层
+        _add = max(0.0, _peak - tgt) if _peak > 0 else 0.0
         diff = tgt - v
-        dcol = (MU if abs(diff) < max(20, 0.1 * v) else (UP if diff > 0 else DN))
-        dtxt = ("—" if abs(diff) < max(20, 0.1 * v)
-                else (f"{diff:+,.0f} 待{'买' if diff > 0 else '卖'}"))
+        _thr = max(20, 0.1 * v)
+        if abs(diff) < _thr:
+            dtxt, dcol = "—", MU
+        elif diff > 0:
+            # 「待买」= 这一段的底仓还没建，下一轮会变成工单；
+            # 「偏差」= 底仓已经建过，这个差额是 VT scale 每 7 天重算 / 权重调整
+            #          带来的漂移。底仓「一段一次」，本段内不会再补 ——
+            #          标成「待买」会让人一直等到一封永远不来的邮件。
+            if o.get("base_settled"):
+                dtxt = (f'<span title="底仓本段已执行过。差额来自波动目标化系数重算'
+                        f'（每 7 天）或权重调整；底仓「一段一次」，本段不再补仓">'
+                        f'{diff:+,.0f} 偏差</span>')
+                dcol = MU
+            else:
+                dtxt, dcol = f"{diff:+,.0f} 待买", UP
+        else:
+            dtxt, dcol = f"{diff:+,.0f} 待卖", DN
         _srows += (
             f'<tr><td style="padding:7px 9px;border-bottom:1px solid {BD}"><b>{o["c"]}</b>'
             + (f'<span style="font-size:10px;color:{MU};border:1px solid {BD};'
@@ -216,7 +239,11 @@ if _SPOT:
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right">{tgt:,.0f} U</td>'
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};text-align:right;color:{dcol}">{dtxt}</td>'
             f'<td style="padding:7px 9px;border-bottom:1px solid {BD};font-size:12px;color:{MU}">'
-            f'{_esc(o.get("target_note") or "")}</td></tr>')
+            f'{_esc(o.get("target_note") or "")}'
+            + (f'<br><span style="font-size:11px;color:{MU}">现货只持底仓 '
+               f'{tgt:,.0f} U；另 {_add:,.0f} U 走永续加仓层（峰值 {_peak:,.0f} U）</span>'
+               if _add > 0 else "")
+            + f'</td></tr>')
     # 日线 DOWN 而没有底仓的币：这是**符合规则**的状态，不是遗漏。
     # 不写这句，看到「11 个币只有 7 个有货」会以为漏买了。
     # （币数会随组合调整而变 —— 2026-11-27 去 DOGE 后是 11，别再写死这个数。）
@@ -239,12 +266,18 @@ if _SPOT:
         f'<tr style="background:#f5f5f5">'
         + "".join(f'<th style="padding:7px 9px;text-align:{al};font-size:12px;color:{MU};font-weight:500">{h}</th>'
                   for h, al in [("品种", "left"), ("日线", "left"), ("持有", "right"),
-                                ("该持有", "right"), ("差额", "right"), ("说明", "left")])
+                                ("现货应持", "right"), ("差额", "right"), ("说明", "left")])
         + f'</tr>{_srows}</table>'
         f'<div style="font-size:12px;color:{MU};margin-top:8px;line-height:1.8">'
         f'「持有」由工单台账推（已结算的建底仓 − 减底仓 − 清底仓）。'
         f'现货底仓没有价格止损，退出只有两条：「日线翻 DOWN → 清底仓」'
         f'与「系数下调 → 减底仓」。'
+        f'<br><b>「现货应持」只含底仓层</b>：target 是「峰值 = 底仓 + 加仓层」，'
+        f'而加仓层走<b>永续</b>。拿 target 减现货持有会把已在永续执行过的加仓层'
+        f'当成「还欠一笔现货」，2026-11-27 实测虚报 181 U（LINK +40、XRP +141）。'
+        f'<br><b>「偏差」不是待办</b>：底仓按「一段一次」执行，同一状态段内不再补仓。'
+        f'标成「偏差」说明这一段的底仓已经动过，差额来自波动目标化系数重算（每 7 天）'
+        f'或权重调整 —— <b>不会有对应的买入提醒</b>。只有状态真的切换才会重新出单。'
         f'<br>带 <b>推定</b> 标记的行：台账里没有该单的实际成交额，'
         f'数字是把建单建议额收窄到当前目标推出来的 —— 它是估计，不是成交记录。'
         f'下单后执行 <code>ticket.py fill &lt;编号&gt; &lt;成交额U&gt;</code> 补录，标记即消失。'
