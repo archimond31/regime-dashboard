@@ -334,3 +334,4 @@ holding_*.png
 !_diag_account_xcheck.py
 # 只读对账 + 资金日报（P0 的地基）。2026-11-27 接上现货层，并改走 DPAPI 密文凭据。
 !_recon.py
+!deploy/set_key.cmd
